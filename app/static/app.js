@@ -24,6 +24,7 @@ let settingsFields = null;
 let currentFilter = 'attention';
 let searchTerm = '';
 let serviceDetail = null;      // the last /api/services/<name> payload
+let versionHistory = null;     // the last /api/version/history payload
 
 const BASE = '';
 
@@ -367,6 +368,10 @@ function renderRail() {
         </label>
         ${state?.disk_free_gb != null ? `<div class="small faint" style="margin-top:9px">
           ${state.disk_free_gb} GB free where books land</div>` : ''}
+        <a class="sidebar-version" href="#/version" style="margin-top:9px">
+          <span class="vnum">v${escapeHtml(versionHistory?.current || '1.0.0')}</span>
+          What's new<span class="new-dot"></span>
+        </a>
       </div>
     </div>`;
 }
@@ -971,6 +976,41 @@ function viewActivity() {
   </div>`;
 }
 
+/* ------------------------------------------------------------- version */
+async function viewVersion() {
+  let d = versionHistory;
+  if (!d) {
+    try { d = await api('/api/version/history'); versionHistory = d; }
+    catch (err) {
+      return `<div class="panel"><div class="body">
+        Could not load version history: ${escapeHtml(err.message)}</div></div>`;
+    }
+  }
+
+  const entries = (d.releases || []).map(rel => `
+    <div class="version-entry">
+      <div class="vhead">
+        <span class="vnum">v${escapeHtml(rel.version)}</span>
+        <span class="vdate">${escapeHtml(rel.date || '')}</span>
+        ${rel.version === d.current ? '<span class="vtag">current</span>' : ''}
+      </div>
+      ${rel.summary ? `<div class="small muted">${escapeHtml(rel.summary)}</div>` : ''}
+      ${(rel.sections || []).map(sec => `
+        <div class="small" style="margin-top:8px"><b>${escapeHtml(sec.heading)}</b></div>
+        <ul class="vchanges">${(sec.items || []).map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+      `).join('')}
+    </div>`).join('');
+
+  return `
+    <div class="panel">
+      <h2><span class="grow">Version history</span>
+        <span class="chip ok">v${escapeHtml(d.current || '?')}</span></h2>
+      <div class="body">
+        <div class="version-page">${entries || '<div class="muted">No releases recorded.</div>'}</div>
+      </div>
+    </div>`;
+}
+
 /* -------------------------------------------------------------- actions */
 async function retryStage(bookId, stage, btn) {
   if (btn) btn.disabled = true;
@@ -1137,6 +1177,7 @@ async function render() {
   else if (r.name === 'services') html = viewServices();
   else if (r.name === 'service') html = await viewService(r.param);
   else if (r.name === 'activity') html = viewActivity();
+  else if (r.name === 'version') html = await viewVersion();
   else html = viewDashboard();
 
   if (token !== renderToken) return;   // a newer render won

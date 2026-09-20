@@ -10,53 +10,191 @@
 <link rel="stylesheet" href="/static/app.css?v=__ASSET_VERSION__">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128218;</text></svg>">
 <style>
-  body { display: grid; place-items: center; min-height: 100vh; }
-  .card {
-    /* NB: this was `var(--panel)`, which is not defined in app.css — the card
-       had no background and the shadow fell on bare cream. `--paper` is the
-       token that actually exists. */
+  html, body { height: 100%; }
+  body {
+    display: grid; place-items: center; min-height: 100vh;
+    background: var(--cream);
+    background-image: radial-gradient(circle at 15% 20%, rgba(0,99,93,.05), transparent 45%),
+                       radial-gradient(circle at 85% 80%, rgba(56,33,16,.05), transparent 45%);
+    padding: 24px 16px;
+  }
+
+  .wrap {
+    display: grid; grid-template-columns: 1fr 1fr;
+    width: min(880px, 100%);
     background: var(--paper);
-    border: 1px solid var(--line-warm);
-    border-radius: var(--radius);
-    padding: 30px 32px; width: min(400px, 92vw);
-    box-shadow: 0 10px 34px rgba(56, 33, 16, .16);
+    border-radius: 6px;
+    box-shadow: 0 20px 50px rgba(56,33,16,.18), 0 2px 8px rgba(56,33,16,.08);
+    overflow: hidden;
   }
-  .card h1 {
-    font-family: var(--serif); font-weight: 700; font-size: 25px;
-    margin: 0 0 3px; color: var(--bar-ink);
+
+  /* ---- left: branding / shelf panel, CSS-only illustration ---- */
+  .brand {
+    background: linear-gradient(165deg, var(--brown) 0%, var(--brown-2) 55%, var(--teal-dark) 130%);
+    color: var(--cream);
+    padding: 44px 38px;
+    display: flex; flex-direction: column; justify-content: space-between;
+    position: relative; overflow: hidden;
   }
-  .card h1 span { color: var(--teal); }
-  .card p.sub { margin: 0 0 22px; color: var(--muted); font-size: 12.5px; }
-  .card button[type=submit] { width: 100%; margin-top: 6px; padding: 10px; font-size: 14px; }
-  #error { margin-top: 14px; color: var(--err); font-size: 13px; min-height: 18px; }
-  .rule { height: 1px; background: var(--line-soft); margin: 22px 0 18px; }
+  .brand::before {
+    /* soft page/paper texture glow */
+    content: ""; position: absolute; inset: 0;
+    background: radial-gradient(circle at 30% 110%, rgba(255,215,103,.18), transparent 55%);
+    pointer-events: none;
+  }
+  .brand-top { position: relative; z-index: 1; }
+  .brand .wordmark {
+    font-family: var(--serif); font-weight: 700; font-size: 28px;
+    color: #fff; text-decoration: none; display: inline-flex;
+  }
+  .brand .wordmark span { color: var(--gold); }
+  .brand .tag {
+    margin: 10px 0 0; font-size: 13.5px; line-height: 1.5;
+    color: rgba(244,241,234,.82); max-width: 30ch;
+  }
+
+  /* shelf of little "book spine" bars — pure CSS, no images */
+  .shelf {
+    position: relative; z-index: 1;
+    display: flex; align-items: flex-end; gap: 5px;
+    height: 108px; margin: 30px 0 6px;
+  }
+  .shelf i {
+    display: block; border-radius: 2px 2px 0 0;
+    box-shadow: 0 3px 6px rgba(0,0,0,.25);
+  }
+  .shelf i:nth-child(1)  { width: 14px; height: 78%; background: var(--gold); }
+  .shelf i:nth-child(2)  { width: 10px; height: 95%; background: var(--teal); }
+  .shelf i:nth-child(3)  { width: 16px; height: 65%; background: var(--cream); }
+  .shelf i:nth-child(4)  { width: 11px; height: 88%; background: var(--coral); }
+  .shelf i:nth-child(5)  { width: 13px; height: 72%; background: var(--teal-dark); border: 1px solid rgba(255,255,255,.25); }
+  .shelf i:nth-child(6)  { width: 9px;  height: 100%; background: var(--gold); }
+  .shelf i:nth-child(7)  { width: 15px; height: 60%; background: var(--cream); }
+  .shelf i:nth-child(8)  { width: 12px; height: 82%; background: var(--teal); }
+  .shelf-base {
+    position: relative; z-index: 1;
+    height: 6px; border-radius: 3px;
+    background: rgba(0,0,0,.28);
+    box-shadow: 0 2px 4px rgba(0,0,0,.2);
+  }
+
+  .brand-quote {
+    position: relative; z-index: 1;
+    font-family: var(--serif); font-style: italic; font-size: 14.5px;
+    line-height: 1.6; color: rgba(244,241,234,.9);
+    border-left: 2px solid var(--gold); padding-left: 14px; margin-top: 34px;
+  }
+  .brand-quote cite {
+    display: block; font-style: normal; font-size: 11.5px;
+    margin-top: 6px; color: rgba(244,241,234,.65);
+  }
+
+  /* ---- right: form panel ---- */
+  .panel-form {
+    padding: 44px 40px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .panel-form h1 {
+    font-family: var(--serif); font-weight: 700; font-size: 23px;
+    margin: 0 0 6px; color: var(--bar-ink);
+  }
+  .panel-form p.sub {
+    margin: 0 0 26px; color: var(--muted); font-size: 13px; line-height: 1.5;
+  }
+
+  label.field { margin-bottom: 15px; }
+  label.field .lbl {
+    font-size: 12.5px; font-weight: 700; color: var(--brown-3);
+    text-transform: uppercase; letter-spacing: .4px; margin-bottom: 5px;
+  }
+  #username, #password {
+    padding: 10px 11px; font-size: 14.5px; border-color: var(--line-warm);
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  #username:focus, #password:focus {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 3px rgba(0,99,93,.12);
+  }
+
+  .card button[type=submit] {
+    width: 100%; margin-top: 8px; padding: 11px; font-size: 14.5px;
+    font-weight: 700; letter-spacing: .2px;
+    box-shadow: 0 2px 6px rgba(0,99,93,.25);
+    transition: background .15s ease, box-shadow .15s ease, transform .05s ease;
+  }
+  .card button[type=submit]:hover:not(:disabled) {
+    box-shadow: 0 4px 10px rgba(0,99,93,.32);
+  }
+  .card button[type=submit]:active:not(:disabled) { transform: translateY(1px); }
+  .card button[type=submit]:focus-visible {
+    outline: 2px solid var(--teal-dark); outline-offset: 2px;
+  }
+  .card button[type=submit]:disabled { box-shadow: none; }
+
+  #error {
+    margin-top: 14px; color: var(--err); font-size: 13px; min-height: 18px;
+    font-weight: 600;
+  }
+
+  .rule { height: 1px; background: var(--line-soft); margin: 24px 0 18px; }
+
+  @media (max-width: 780px) {
+    body { padding: 0; }
+    .wrap {
+      grid-template-columns: 1fr; width: 100%; min-height: 100vh;
+      border-radius: 0; box-shadow: none;
+    }
+    .brand { padding: 30px 26px 26px; }
+    .shelf { height: 70px; margin: 18px 0 6px; }
+    .brand-quote { display: none; }
+    .panel-form { padding: 32px 26px 40px; }
+  }
 </style>
 </head>
 <body>
-<form class="card" id="form">
-  <h1>Good<span>reads</span></h1>
-  <p class="sub">Goodreads &rarr; Shelfmark &rarr; your library</p>
+<div class="wrap">
+  <div class="brand">
+    <div class="brand-top">
+      <a class="wordmark" href="/">Good<span>reads</span></a>
+      <p class="tag">Shelfmark — your self-hosted library pipeline, styled after Goodreads.</p>
+      <div class="shelf">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </div>
+      <div class="shelf-base"></div>
+    </div>
+    <p class="brand-quote">
+      &ldquo;A reader lives a thousand lives before he dies.&rdquo;
+      <cite>— George R. R. Martin</cite>
+    </p>
+  </div>
 
-  <label class="field">
-    <span class="lbl">Username</span>
-    <input id="username" name="username" type="text" autocomplete="username"
-           autocapitalize="none" autocorrect="off" spellcheck="false" autofocus required>
-  </label>
+  <div class="panel-form">
+    <form class="card" id="form">
+      <h1>Sign in</h1>
+      <p class="sub">Enter your credentials to reach your shelves and pipeline.</p>
 
-  <label class="field">
-    <span class="lbl">Password</span>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-  </label>
+      <label class="field">
+        <span class="lbl">Username</span>
+        <input id="username" name="username" type="text" autocomplete="username"
+               autocapitalize="none" autocorrect="off" spellcheck="false" autofocus required>
+      </label>
 
-  <button type="submit" class="primary" id="submit">Sign in</button>
-  <div id="error" role="alert"></div>
+      <label class="field">
+        <span class="lbl">Password</span>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
+      </label>
 
-  <div class="rule"></div>
-  <p class="faint small" style="margin:0">
-    Repeated failures are rate-limited with a growing delay. A correct password
-    always gets through.
-  </p>
-</form>
+      <button type="submit" class="primary" id="submit">Sign in</button>
+      <div id="error" role="alert"></div>
+
+      <div class="rule"></div>
+      <p class="faint small" style="margin:0">
+        Repeated failures are rate-limited with a growing delay. A correct password
+        always gets through.
+      </p>
+    </form>
+  </div>
+</div>
 
 <script>
 const form = document.getElementById('form');

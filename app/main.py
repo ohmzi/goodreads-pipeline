@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import auth, models
+from . import auth, models, version_data
 from .clients.abs_client import AudiobookshelfClient
 from .clients.base import ClientError
 from .clients.booklore import BookLoreClient, GrimmoryClient
@@ -345,6 +345,12 @@ def goodreads_page() -> HTMLResponse:
 def version() -> dict:
     """What the running instance is actually serving."""
     return {"asset_version": _asset_version(), "app": "goodreads", "version": app.version}
+
+
+@app.get("/api/version/history")
+def version_history() -> dict:
+    """Per-release breakdown for the version page."""
+    return {"current": app.version, "releases": version_data.VERSION_HISTORY}
 
 
 # --------------------------------------------------------------------------

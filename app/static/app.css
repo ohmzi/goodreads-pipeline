@@ -41,7 +41,9 @@
   --ink-2:        #333333;   /* .bookTitle colour */
   --muted:        #666666;   /* .bookMeta colour */
   --faint:        #767676;
-  --ghost:        #999999;
+  --ghost:        #757575;   /* darkened from #999 — #999 on --paper/--cream
+                                 fails WCAG AA (~2.8:1) at the 12-13px sizes
+                                 it's used at; #757575 clears 4.5:1 */
 
   --line:         #d8d8d8;   /* their most-used border */
   --line-list:    #d7d7d7;   /* .elementList border-bottom */
@@ -58,6 +60,15 @@
   --err-bg:       #fbeceb;
   --info:         #1b5e8a;
   --info-bg:      #eaf1f7;
+
+  /* --- shared elevation scale --------------------------------------------
+     One shadow scale for every panel/card/toast, so "how far off the page
+     something sits" reads the same everywhere instead of each block picking
+     its own rgba. sm = resting card edge, md = hover/raised, lg = floating
+     (toasts, popovers). */
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.14);
+  --shadow-md: 0 2px 8px rgba(0,0,0,.20);
+  --shadow-lg: 0 6px 22px rgba(0,0,0,.18);
 
   --radius: 4px;
   /* Their two stacks, verbatim. Lato for the interface, Merriweather for
@@ -82,6 +93,10 @@ body {
 
 a { color: var(--teal); text-decoration: none; }
 a:hover { text-decoration: underline; color: var(--teal-dark); }
+a:focus-visible, .nav a:focus-visible, .health-pill:focus-visible,
+.svc-row:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--teal); outline-offset: 2px;
+}
 
 /* ============================================================== toolbar */
 /* 50px, light, brown text, darkening only on hover — .siteHeader__contents
@@ -189,6 +204,7 @@ a:hover { text-decoration: underline; color: var(--teal-dark); }
   background: var(--paper); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 12px 14px; text-align: left;
   font: inherit;
+  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
 }
 .tile .n { font-family: var(--serif); font-size: 25px; line-height: 1.1; color: var(--brown); }
 .tile .k { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
@@ -196,7 +212,7 @@ a:hover { text-decoration: underline; color: var(--teal-dark); }
 .tile.warn .n { color: var(--warn); }
 .tile.err .n  { color: var(--err); }
 .tile.clickable { cursor: pointer; }
-.tile.clickable:hover { border-color: var(--teal); }
+.tile.clickable:hover { border-color: var(--teal); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
 .tile.on { border-color: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); }
 
 /* ============================================================= book list */
@@ -208,13 +224,15 @@ a:hover { text-decoration: underline; color: var(--teal-dark); }
   gap: 13px; padding: 12px 15px;
   border-bottom: 1px solid var(--line-list);
   cursor: pointer;
+  transition: background-color .15s ease;
 }
 .book-row:last-child { border-bottom: none; }
 .book-row:hover { background: #fbfaf8; }
+.book-row:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
 
 .book-row .cover {
   width: 52px; height: 78px; border-radius: 2px; object-fit: cover;
-  background: var(--cream-2); box-shadow: 0 1px 3px rgba(0,0,0,.22);
+  background: var(--cream-2); box-shadow: var(--shadow-sm);
 }
 .book-row .cover.blank { display: grid; place-items: center; color: var(--ghost); font-size: 18px; }
 
@@ -244,7 +262,7 @@ a:hover { text-decoration: underline; color: var(--teal-dark); }
 .bookpage { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; }
 .bookpage .cover-lg {
   width: 190px; border-radius: 3px; background: var(--cream-2);
-  box-shadow: 0 2px 8px rgba(0,0,0,.28);
+  box-shadow: var(--shadow-md);
 }
 .bookpage .cover-lg.blank {
   height: 285px; display: grid; place-items: center; color: var(--ghost); font-size: 44px;
@@ -294,8 +312,10 @@ a:hover { text-decoration: underline; color: var(--teal-dark); }
 .svc {
   background: var(--paper); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 12px 14px; cursor: pointer;
+  transition: border-color .18s ease, box-shadow .18s ease;
 }
-.svc:hover { border-color: var(--teal); }
+.svc:hover { border-color: var(--teal); box-shadow: var(--shadow-sm); }
+.svc:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
 .svc.down { border-color: #e3b7b3; background: var(--err-bg); }
 .svc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
 .svc-head .name { font-family: var(--serif); font-size: 15.5px; color: var(--brown); font-weight: 700; }
@@ -315,6 +335,7 @@ a:hover { text-decoration: underline; color: var(--teal-dark); }
   padding: 2px 7px; border-radius: 4px; font-size: 11px;
   border: 1px solid var(--line); background: var(--cream);
   color: var(--ink-2); white-space: nowrap;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease;
 }
 .chip.ok      { border-color: #b8dcc5; color: var(--ok); background: var(--ok-bg); }
 .chip.failed  { border-color: #e3b7b3; color: var(--err); background: var(--err-bg); }
@@ -339,8 +360,12 @@ button, .btn {
   background: var(--paper); color: var(--ink-2);
   border: 1px solid var(--line); border-radius: var(--radius);
   padding: 5px 11px;
+  transition: border-color .15s ease, color .15s ease, background-color .15s ease;
 }
 button:hover, .btn:hover { border-color: var(--teal); color: var(--teal); }
+button:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--teal); outline-offset: 1px;
+}
 button:disabled { opacity: .55; cursor: default; }
 button.primary { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 600; }
 button.primary:hover { background: var(--teal-dark); color: #fff; }
@@ -356,6 +381,9 @@ input[type="text"], input[type="password"], input[type="search"], select, textar
   border-radius: var(--radius); padding: 6px 9px; width: 100%;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--teal); }
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--teal); outline-offset: 1px;
+}
 input::placeholder { color: var(--ghost); }
 
 label.field { display: block; margin-bottom: 11px; }
@@ -365,7 +393,7 @@ label.field .hint { font-size: 11.5px; color: var(--ghost); margin-top: 3px; }
 /* ============================================================== filters */
 /* Goodreads' filter pills: quiet until selected, then the dark brown. */
 .filters { display: flex; gap: 5px; flex-wrap: wrap; }
-.filters button { font-size: 12.5px; border-radius: 999px; padding: 4px 12px; }
+.filters button { font-size: 12.5px; border-radius: 999px; padding: 4px 12px; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
 .filters button.on {
   background: var(--brown); border-color: var(--brown);
   color: var(--cream); font-weight: 600;
@@ -417,7 +445,7 @@ label.field .hint { font-size: 11.5px; color: var(--ghost); margin-top: 3px; }
 .toast {
   background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--teal);
   border-radius: var(--radius); padding: 10px 13px; font-size: 13px;
-  box-shadow: 0 6px 22px rgba(0,0,0,.18);
+  box-shadow: var(--shadow-lg);
 }
 .toast.ok  { border-left-color: var(--ok); }
 .toast.err { border-left-color: var(--err); }
@@ -469,4 +497,50 @@ label.field .hint { font-size: 11.5px; color: var(--ghost); margin-top: 3px; }
      line — a vertical smear of letters down the page. */
   .held-row { grid-template-columns: 1fr; gap: 3px; padding: 9px 15px; }
   .held-row .chip { justify-self: start; }
+}
+
+/* =========================================================== version page */
+/* A single scrollable timeline of releases — one entry per version, newest
+   first. Each entry is its own panel-like block (paper on cream, matching
+   .panel) so long changelogs still read as a list of distinct events rather
+   than one undifferentiated wall of text. */
+.version-page { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+.version-entry {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 14px 16px;
+  box-shadow: var(--shadow-sm);
+}
+.version-entry .vhead {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.version-entry .vnum {
+  font-family: var(--serif); font-weight: 700; font-size: 17px; color: var(--brown);
+}
+.version-entry .vdate { font-size: 12px; color: var(--muted); }
+.version-entry .vtag {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--teal); border: 1px solid var(--teal); border-radius: 999px;
+  padding: 1px 8px;
+}
+.version-entry ul.vchanges { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+.version-entry ul.vchanges li { margin-bottom: 3px; }
+
+/* ======================================================== sidebar version */
+/* Small pill/link for the right rail (follows .rail-card's look) showing the
+   running app's version number, with a quiet dot when a newer release has
+   shipped since the viewer last opened this. Clicking it goes to
+   .version-page above. */
+.sidebar-version {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+  border: 1px solid var(--line); border-radius: 999px;
+  padding: 4px 10px; background: var(--paper);
+  text-decoration: none; transition: border-color .15s ease, color .15s ease;
+}
+.sidebar-version:hover { border-color: var(--teal); color: var(--teal); text-decoration: none; }
+.sidebar-version .vnum { font-family: var(--mono); color: var(--ink-2); }
+.sidebar-version .new-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--coral);
+  flex: none; display: inline-block;
 }
