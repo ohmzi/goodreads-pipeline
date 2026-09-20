@@ -1,0 +1,56 @@
+# goodreads — see README.md and docs/OPERATIONS.md
+#
+# Host-specific values (library paths, the networks your other services live
+# on, the published port if it collides, an explicit subnet if docker's address
+# pools are exhausted) belong in a docker-compose.override.yml beside this file.
+# Compose loads that automatically, which is what lets this file stay portable —
+# and note that passing any explicit -f disables that automatic loading, so keep
+# overrides out of your command line.
+
+services:
+  goodreads:
+    build: .
+    image: goodreads:local
+    container_name: goodreads
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+      BOOKS_ROOT: /books
+      AUDIOBOOKS_ROOT: /audiobooks
+      # Open Notebook mounts the same host tree at a different path, and its
+      # API validates file paths against its own uploads root.
+      OPENNOTEBOOK_LIBRARY_ROOT: /app/data/uploads/library
+    ports:
+      # This is the ONLY published port on purpose. noVNC is served by the app
+      # itself and its WebSocket is session-checked, so the browser that gets
+      # logged into Goodreads has no port of its own. Change the host side if
+      # 8091 is taken; uvicorn listens on 8090 in-container either way.
+      - "8091:8090"
+    volumes:
+      # Placeholders, so a clone runs without editing this file. Point them at
+      # your real library in docker-compose.override.yml — see
+      # docs/CONFIGURATION.md for the mount-namespace rules, which matter
+      # because each integrating service sees the same files at a different path.
+      - ./data:/data
+      - ./books:/books
+      - ./audiobooks:/audiobooks
+    healthcheck:
+      # Unauthenticated on purpose, so the probe does not need a session.
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8090/api/health')"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    # Services that keep to their own isolated docker network, and hosts whose
+    # firewall blocks container -> host published ports, both require joining
+    # them by name. Add your own networks in docker-compose.override.yml.
+    networks:
+      - default
+
+networks:
+  # If `docker compose up` fails with "all predefined address pools have been
+  # fully subnetted", pin an explicit free private subnet for this network in
+  # docker-compose.override.yml rather than letting docker's allocator choose.
+  default:

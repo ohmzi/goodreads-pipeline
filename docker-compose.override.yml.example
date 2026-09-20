@@ -1,0 +1,40 @@
+# Example override file. Copy to docker-compose.override.yml, which is gitignored
+# and loaded automatically alongside docker-compose.yml. Everything here is
+# host-specific, which is exactly why it is kept out of the committed file.
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#
+# Volumes, networks and environment entries merge by key, so an entry here
+# replaces the matching placeholder in docker-compose.yml.
+
+services:
+  goodreads:
+    volumes:
+      # The library trees. These must be real host paths, and every service that
+      # shares them has to mount them, or the app's path translation (see
+      # docs/CONFIGURATION.md) cannot line up.
+      - /path/to/data:/data
+      - /path/to/books:/books
+      - /path/to/audiobooks:/audiobooks
+    environment:
+      # Audiobookshelf mounts the audiobooks tree at its own full host path
+      # rather than a neutral one, so this is how ABS itself sees the library.
+      # Setting it wrong makes `index` fail to find books that are present.
+      ABS_LIBRARY_ROOT: /path/to/audiobooks
+    # Only needed if your other services live on their own docker networks and
+    # your firewall blocks container -> host published ports. The app reaches
+    # them by container name, so it has to share a network with each one.
+    # networks:
+    #   - default
+    #   - your_other_service_default
+
+# Uncomment if `docker compose up` reports that all predefined address pools
+# have been fully subnetted — docker's default pools are exhausted, so pin a
+# free private range instead.
+# networks:
+#   default:
+#     ipam:
+#       config:
+#         - subnet: 10.42.0.0/24
+#   your_other_service_default:
+#     external: true

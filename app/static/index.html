@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Goodreads</title>
+<!-- Goodreads' own pairing: Lato for the interface, Merriweather for titles
+     and bylines. Loaded from Google Fonts with the full system fallback in
+     app.css, so the page degrades to Georgia/Helvetica with no internet. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Merriweather:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/app.css?v=__ASSET_VERSION__">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128218;</text></svg>">
+</head>
+<body>
+<div class="shell">
+  <!-- A 50px light bar with brown text, which is what goodreads.com's own
+       .siteHeader is: #382110 is the colour of the *text* on it, and the bar
+       only goes dark (#32362d) under the pointer. -->
+  <header class="bar">
+    <div class="bar-inner">
+      <a class="wordmark" href="#/">Good<span>reads</span></a>
+      <nav class="nav" id="nav"></nav>
+      <span class="spacer"></span>
+      <div class="bar-search">
+        <input type="search" id="global-search" placeholder="Search books"
+               oninput="onHeaderSearch(this.value)" autocomplete="off" aria-label="Search books">
+      </div>
+      <!-- The one control with no Goodreads equivalent: service health, always
+           on screen, one click from the page that explains and logs it. -->
+      <a class="health-pill" id="health-pill" href="#/services"></a>
+      <div class="bar-account">
+        <span class="who" id="headline"></span>
+        <button class="ghost tiny" onclick="signOut()">Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="page" id="page">
+    <div class="col" id="main">
+      <div id="banner"></div>
+      <div id="view"><div class="empty">Loading…</div></div>
+    </div>
+    <aside class="rail" id="rail"></aside>
+  </div>
+</div>
+
+<div id="toasts"></div>
+<script src="/static/app.js?v=__ASSET_VERSION__"></script>
+<script>
+function signOut() {
+  fetch('/api/auth/logout', { method: 'POST' }).finally(() => window.location.replace('/login'));
+}
+</script>
+</body>
+</html>

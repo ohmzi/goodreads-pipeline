@@ -1,0 +1,145 @@
+# Where a book goes, decided by its genre.
+#
+# `genres` maps a genre string to exactly one category; `categories` maps that
+# category to its folder on disk and the Open Notebook notebook that should
+# receive it. The notebook names deliberately do NOT match the folder names —
+# that mismatch is real (your notebooks are "Fictional", "historical",
+# "Self help", "Islamic guidance"), so it is encoded here rather than guessed
+# at runtime.
+#
+# Matching is substring, case-insensitive, and **longest needle first** — so
+# "science fiction" beats "fiction", and "space opera" beats "space", without
+# depending on the order things appear below. Add specific rules freely.
+#
+# A book resolves to exactly ONE category: its genres are scanned in the order
+# Goodreads ranks them (most popular first) and the first genre that hits any
+# rule decides. No hit at all falls back to `fallback` and is flagged
+# needs_review in the UI so you can fix it rather than have it misfiled.
+
+fallback: Fiction
+
+categories:
+  SciFi:
+    folder: Space
+    notebook: Space
+  Fantasy:
+    folder: Fiction
+    notebook: Fictional
+  Fiction:
+    folder: Fiction
+    notebook: Fictional
+  History:
+    folder: History
+    notebook: historical
+  Technical:
+    folder: Technical
+    notebook: Technical
+  Self-Help:
+    folder: Self-Help
+    notebook: Self help
+  How-To:
+    folder: How-To
+    notebook: How-To
+  Islamic:
+    folder: Islamic
+    notebook: Islamic guidance
+  Manga:
+    folder: Manga
+    notebook: ""          # no notebook yet; the notebook stage skips these
+  Natgeo:
+    folder: Natgeo
+    notebook: ""
+
+genres:
+  # --- speculative -----------------------------------------------------
+  science fiction: SciFi
+  speculative fiction: SciFi
+  sci-fi: SciFi
+  scifi: SciFi
+  space opera: SciFi
+  space exploration: SciFi
+  dystopia: SciFi
+  cyberpunk: SciFi
+
+  # --- fantasy ---------------------------------------------------------
+  epic fantasy: Fantasy
+  urban fantasy: Fantasy
+  magical realism: Fantasy
+  fantasy: Fantasy
+
+  # --- history ---------------------------------------------------------
+  historical fiction: History
+  military history: History
+  ancient history: History
+  history: History
+  biography: History
+  autobiography: History
+  memoir: History
+
+  # --- technical -------------------------------------------------------
+  computer science: Technical
+  software engineering: Technical
+  software architecture: Technical
+  software development: Technical
+  programming: Technical
+  algorithms: Technical
+  data science: Technical
+  machine learning: Technical
+  mathematics: Technical
+  engineering: Technical
+  technology: Technical
+  # Titles carry these even when no metadata source has genres, which is the
+  # only reason a book like "Software Architecture with Kotlin" classifies at
+  # all. Deliberately multi-word or unambiguous — a bare "architecture" would
+  # sweep in books about buildings.
+  kotlin: Technical
+  python: Technical
+  javascript: Technical
+  rust programming: Technical
+  c++: Technical
+  databases: Technical
+  networking: Technical
+  linux: Technical
+  devops: Technical
+  cybersecurity: Technical
+  cryptography: Technical
+
+  # --- self help -------------------------------------------------------
+  self help: Self-Help
+  self-help: Self-Help
+  personal development: Self-Help
+  psychology: Self-Help
+  productivity: Self-Help
+  philosophy: Self-Help
+
+  # --- islamic ---------------------------------------------------------
+  islamic: Islamic
+  islam: Islamic
+  quran: Islamic
+  muslim: Islamic
+  sufism: Islamic
+
+  # --- manga / comics --------------------------------------------------
+  manga: Manga
+  graphic novels: Manga
+  comics: Manga
+
+  # --- nature / geography ----------------------------------------------
+  nature: Natgeo
+  natural history: Natgeo
+  geography: Natgeo
+  travel: Natgeo
+
+  # --- practical -------------------------------------------------------
+  how to: How-To
+  cookbook: How-To
+  cooking: How-To
+  crafts: How-To
+  hobbies: How-To
+  reference: How-To
+
+  # --- general ---------------------------------------------------------
+  fiction: Fiction
+  literary fiction: Fiction
+  classics: Fiction
+  novel: Fiction

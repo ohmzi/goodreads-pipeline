@@ -1,0 +1,472 @@
+/* Goodreads — self-hosted edition.
+ *
+ * The visual language is goodreads.com's, read out of their production
+ * stylesheet rather than eyeballed. The values that matter are in the token
+ * block below with the rule each came from, because guessing them is what
+ * produced the wrong header once already: their nav bar is a *light* bar with
+ * brown text, and #382110 is the colour of the text, not of the bar.
+ *
+ * What is added on top is everything Goodreads never needed and a self-hosted
+ * tool cannot do without — which service each failure came from, and a log to
+ * prove it. Three rules keep that from turning into noise:
+ *
+ *   - Brown is ink, cream is page, white is content. Teal is only ever an
+ *     action. If everything is teal, nothing reads as clickable.
+ *   - Service problems are amber (something to know), pipeline failures are
+ *     red (something to do). Never red for "a format does not exist" —
+ *     that is a fact about the world, not a fault.
+ *   - Every failure names its service and links to that service's page. A
+ *     failure you cannot attribute is a failure you cannot act on.
+ */
+
+:root {
+  /* --- goodreads.com, verbatim ------------------------------------------ */
+  --bar:          #faf8f6;   /* .siteHeader__topLine background */
+  --bar-hover:    #32362d;   /* .siteHeader__topLevelLink:hover background */
+  --bar-ink:      #382110;   /* .siteHeader__topLevelLink colour */
+  --cream:        #f4f1ea;   /* the page */
+  --cream-2:      #ebe8d5;   /* .siteHeader__primaryNavSeparateLine tone */
+  --cream-3:      #ede6d6;   /* .searchBox__button:hover */
+  --paper:        #ffffff;
+  --teal:         #00635d;   /* links and actions — their most-used accent */
+  --teal-dark:    #004d48;
+  --coral:        #fa604a;   /* their alert orange */
+  --gold:         #ffd767;   /* .gr-button--choice */
+  --brown:        #382110;
+  --brown-2:      #58371f;
+  --brown-3:      #75482a;
+
+  /* --- their greys, which is most of the palette ------------------------ */
+  --ink:          #181818;
+  --ink-2:        #333333;   /* .bookTitle colour */
+  --muted:        #666666;   /* .bookMeta colour */
+  --faint:        #767676;
+  --ghost:        #999999;
+
+  --line:         #d8d8d8;   /* their most-used border */
+  --line-list:    #d7d7d7;   /* .elementList border-bottom */
+  --line-warm:    #d6d0c4;
+  --line-soft:    #e8e8e8;
+  --line-brown:   #ebe8d5;   /* .elementListBrown border-bottom */
+
+  /* --- state ------------------------------------------------------------ */
+  --ok:           #1e7b45;
+  --ok-bg:        #eaf5ee;
+  --warn:         #9a6700;
+  --warn-bg:      #fdf5e3;
+  --err:          #a8322b;
+  --err-bg:       #fbeceb;
+  --info:         #1b5e8a;
+  --info-bg:      #eaf1f7;
+
+  --radius: 4px;
+  /* Their two stacks, verbatim. Lato for the interface, Merriweather for
+     titles *and* author bylines — the pairing is most of what makes the page
+     read as Goodreads rather than as a generic library app. */
+  --serif: Merriweather, Georgia, "Times New Roman", serif;
+  --sans:  Lato, "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono:  ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  --rail: 288px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--cream);
+  color: var(--ink);
+  font: 14px/1.55 var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--teal); text-decoration: none; }
+a:hover { text-decoration: underline; color: var(--teal-dark); }
+
+/* ============================================================== toolbar */
+/* 50px, light, brown text, darkening only on hover — .siteHeader__contents
+   and .siteHeader__topLevelLink. */
+.bar {
+  background: var(--bar);
+  border-bottom: 1px solid var(--line-warm);
+  position: sticky; top: 0; z-index: 40;
+}
+.bar-inner {
+  display: flex; align-items: stretch; gap: 0;
+  max-width: 1400px; margin: 0 auto; height: 50px;
+  padding: 0 15px;
+}
+.wordmark {
+  font-family: var(--serif); font-size: 21px; font-weight: 700;
+  color: var(--bar-ink); text-decoration: none;
+  display: flex; align-items: center; padding: 0 16px 0 0;
+  margin-right: 4px; white-space: nowrap;
+}
+.wordmark:hover { color: var(--bar-ink); text-decoration: none; }
+.wordmark span { color: var(--teal); }
+
+.nav { display: flex; align-items: stretch; }
+.nav a {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 16px; line-height: 50px; padding: 0 18px;
+  color: var(--bar-ink); text-decoration: none; white-space: nowrap;
+}
+.nav a:hover { background: var(--bar-hover); color: #fff; text-decoration: none; }
+.nav a.active { background: var(--bar-hover); color: #fff; font-weight: 700; }
+.nav a.active:hover { color: #fff; }
+
+.bar .spacer { flex: 1; }
+
+/* Search sits in the toolbar, where Goodreads keeps it. */
+.bar-search { display: flex; align-items: center; padding: 0 10px; }
+.bar-search input {
+  width: 300px; max-width: 34vw;
+  background: var(--paper); border: 1px solid var(--line-warm);
+  border-radius: var(--radius); padding: 6px 10px; font-size: 14px;
+}
+.bar-search input:focus { outline: none; border-color: var(--teal); }
+
+.bar-account { display: flex; align-items: center; gap: 8px; padding-left: 8px; }
+.bar-account .who {
+  font-size: 12px; color: var(--faint); text-align: right; line-height: 1.3;
+}
+.bar-account .who b { color: var(--bar-ink); }
+
+/* The one thing Goodreads has no equivalent of: a permanent read on whether
+   the services this app drives are actually working. */
+.health-pill {
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line-warm); background: var(--paper);
+  border-radius: 999px; padding: 4px 11px; font-size: 12.5px;
+  color: var(--bar-ink); cursor: pointer; white-space: nowrap;
+}
+.health-pill:hover { border-color: var(--teal); text-decoration: none; }
+.health-pill.bad { border-color: #e3b7b3; background: var(--err-bg); color: #7d2620; }
+.health-pill.warn { border-color: #e6d3a3; background: var(--warn-bg); color: #7a5200; }
+
+/* =============================================================== layout */
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+.page {
+  flex: 1; width: 100%; max-width: 1400px; margin: 0 auto;
+  padding: 18px 15px 40px;
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--rail);
+  gap: 18px; align-items: start;
+}
+.page.single { grid-template-columns: minmax(0, 1fr); }
+.col { min-width: 0; }
+
+/* =============================================================== banner */
+.banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 11px 15px; border-radius: var(--radius); margin-bottom: 14px;
+  border: 1px solid; font-size: 13.5px;
+}
+.banner.err  { background: var(--err-bg);  border-color: #e3b7b3; color: #7d2620; }
+.banner.warn { background: var(--warn-bg); border-color: #e6d3a3; color: #7a5200; }
+.banner.ok   { background: var(--ok-bg);   border-color: #b8dcc5; color: #1a5c36; }
+.banner b { color: var(--ink); }
+.banner .grow { flex: 1; }
+
+/* ================================================================ cards */
+.panel {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
+}
+.panel > h2 {
+  margin: 0; padding: 10px 15px; font-size: 12px; font-weight: 700;
+  letter-spacing: .5px; text-transform: uppercase; color: var(--brown-3);
+  border-bottom: 1px solid var(--line); background: var(--cream-2);
+  display: flex; align-items: center; gap: 10px;
+}
+.panel > h2 .grow { flex: 1; }
+.panel .body { padding: 14px 15px; }
+.panel .body.tight { padding: 8px 15px; }
+.panel .body.flush { padding: 0; }
+
+/* ================================================================ tiles */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 9px; margin-bottom: 14px; }
+.tile {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px; text-align: left;
+  font: inherit;
+}
+.tile .n { font-family: var(--serif); font-size: 25px; line-height: 1.1; color: var(--brown); }
+.tile .k { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+.tile.ok .n   { color: var(--ok); }
+.tile.warn .n { color: var(--warn); }
+.tile.err .n  { color: var(--err); }
+.tile.clickable { cursor: pointer; }
+.tile.clickable:hover { border-color: var(--teal); }
+.tile.on { border-color: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); }
+
+/* ============================================================= book list */
+/* .elementList: a rule between rows and nothing else. The cover does the
+   work; the row is not a card. */
+.book-list { display: flex; flex-direction: column; }
+.book-row {
+  display: grid; grid-template-columns: 52px minmax(0, 1fr) auto;
+  gap: 13px; padding: 12px 15px;
+  border-bottom: 1px solid var(--line-list);
+  cursor: pointer;
+}
+.book-row:last-child { border-bottom: none; }
+.book-row:hover { background: #fbfaf8; }
+
+.book-row .cover {
+  width: 52px; height: 78px; border-radius: 2px; object-fit: cover;
+  background: var(--cream-2); box-shadow: 0 1px 3px rgba(0,0,0,.22);
+}
+.book-row .cover.blank { display: grid; place-items: center; color: var(--ghost); font-size: 18px; }
+
+/* Merriweather bold, the way .bookTitle is. */
+.book-row .title {
+  font-family: var(--serif); font-weight: 700; font-size: 15px;
+  line-height: 1.3; color: var(--ink-2);
+}
+.book-row a.title:hover { color: var(--teal); }
+/* .authorName is serif too — not the sans used for everything else. */
+.book-row .byline {
+  font-family: var(--serif); font-size: 13px; color: var(--ink-2); margin-top: 1px;
+}
+.book-row .byline a { color: var(--teal); }
+.book-row .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
+.book-row .side { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
+
+/* The line that matters: what is blocking this book, and who is to blame. */
+.blocker { margin-top: 6px; font-size: 12.5px; }
+.blocker .msg { color: var(--err); word-break: break-word; }
+.blocker .msg.soft { color: var(--warn); }
+.blocker .msg.quiet { color: var(--muted); }
+
+.pipeline { display: flex; gap: 3px; flex-wrap: wrap; }
+
+/* =============================================================== book page */
+.bookpage { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; }
+.bookpage .cover-lg {
+  width: 190px; border-radius: 3px; background: var(--cream-2);
+  box-shadow: 0 2px 8px rgba(0,0,0,.28);
+}
+.bookpage .cover-lg.blank {
+  height: 285px; display: grid; place-items: center; color: var(--ghost); font-size: 44px;
+}
+.bookpage h1 {
+  font-family: var(--serif); font-weight: 700; font-size: 26px;
+  line-height: 1.25; margin: 0 0 4px; color: var(--ink-2);
+}
+.bookpage .byline { font-family: var(--serif); font-size: 15px; color: var(--ink-2); }
+.bookpage .byline a { color: var(--teal); }
+
+/* Goodreads' .bookMeta: label left, value right, #666 against black. */
+.kv { display: grid; grid-template-columns: 118px 1fr; gap: 5px 14px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; word-break: break-word; }
+.kv dd.mono { font-family: var(--mono); font-size: 12px; word-break: break-all; }
+
+/* ================================================================ stages */
+.stages { display: flex; flex-direction: column; }
+.stage-row {
+  display: grid; grid-template-columns: 138px 112px minmax(0, 1fr) auto;
+  gap: 12px; align-items: start; padding: 11px 15px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.stage-row:last-child { border-bottom: none; }
+.stage-row.svc-ok .stage-name { color: var(--brown); }
+.stage-name { font-family: var(--serif); font-size: 14px; color: var(--brown); }
+.stage-detail { font-size: 12.5px; color: var(--ink-2); word-break: break-word; }
+.stage-detail .why { color: var(--muted); font-style: italic; display: block; margin-top: 3px; }
+.stage-attempts { font-size: 11.5px; color: var(--ghost); margin-top: 2px; }
+
+/* ============================================================== services */
+.svc-list { display: flex; flex-direction: column; }
+.svc-row {
+  display: grid; grid-template-columns: 10px 104px minmax(0, 1fr);
+  gap: 9px; align-items: center; padding: 9px 12px;
+  border-bottom: 1px solid var(--line-soft); cursor: pointer; font-size: 13px;
+}
+.svc-row:last-child { border-bottom: none; }
+.svc-row:hover { background: var(--cream); }
+.svc-row .name { font-family: var(--serif); color: var(--brown); }
+.svc-row .note { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svc-row.bad { background: var(--err-bg); }
+.svc-row.bad .note { color: #7d2620; }
+
+.svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 11px; }
+.svc {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 12px 14px; cursor: pointer;
+}
+.svc:hover { border-color: var(--teal); }
+.svc.down { border-color: #e3b7b3; background: var(--err-bg); }
+.svc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.svc-head .name { font-family: var(--serif); font-size: 15.5px; color: var(--brown); font-weight: 700; }
+.svc-head .grow { flex: 1; }
+.svc .meta { font-size: 12.5px; color: var(--ink-2); word-break: break-word; }
+.svc .impact { font-size: 12px; color: var(--muted); margin-top: 4px; font-style: italic; }
+
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.dot.ok   { background: var(--ok); }
+.dot.err  { background: var(--err); }
+.dot.warn { background: var(--warn); }
+.dot.idle { background: var(--ghost); }
+
+/* ================================================================ chips */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px; border-radius: 4px; font-size: 11px;
+  border: 1px solid var(--line); background: var(--cream);
+  color: var(--ink-2); white-space: nowrap;
+}
+.chip.ok      { border-color: #b8dcc5; color: var(--ok); background: var(--ok-bg); }
+.chip.failed  { border-color: #e3b7b3; color: var(--err); background: var(--err-bg); }
+.chip.blocked { border-color: #e6d3a3; color: var(--warn); background: var(--warn-bg); }
+.chip.running { border-color: #b9d2e5; color: var(--info); background: var(--info-bg); }
+.chip.skipped { opacity: .7; }
+.chip.pending { opacity: .8; }
+.chip.auth    { border-color: var(--err); color: #fff; background: var(--err); font-weight: 700; }
+.chip.nodata  { border-color: var(--line); color: var(--muted); background: transparent; }
+
+/* Which service a failure belongs to. A link, always — the whole point is
+   that one click gets you to that service's own page and log. */
+.chip.svc-tag {
+  border-color: var(--line-warm); background: var(--cream-2);
+  color: var(--brown-3); font-weight: 600; text-decoration: none;
+}
+a.chip.svc-tag:hover { border-color: var(--teal); color: var(--teal); text-decoration: none; }
+
+/* ============================================================= controls */
+button, .btn {
+  font: inherit; font-size: 13px; cursor: pointer;
+  background: var(--paper); color: var(--ink-2);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 5px 11px;
+}
+button:hover, .btn:hover { border-color: var(--teal); color: var(--teal); }
+button:disabled { opacity: .55; cursor: default; }
+button.primary { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 600; }
+button.primary:hover { background: var(--teal-dark); color: #fff; }
+button.tiny { padding: 2px 7px; font-size: 11.5px; }
+button.ghost { background: transparent; border-color: transparent; color: var(--teal); }
+button.ghost:hover { text-decoration: underline; }
+button.link { background: none; border: none; color: var(--teal); padding: 0; font-size: inherit; }
+button.link:hover { text-decoration: underline; }
+
+input[type="text"], input[type="password"], input[type="search"], select, textarea {
+  font: inherit; font-size: 13px; color: var(--ink);
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 6px 9px; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--teal); }
+input::placeholder { color: var(--ghost); }
+
+label.field { display: block; margin-bottom: 11px; }
+label.field .lbl { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+label.field .hint { font-size: 11.5px; color: var(--ghost); margin-top: 3px; }
+
+/* ============================================================== filters */
+/* Goodreads' filter pills: quiet until selected, then the dark brown. */
+.filters { display: flex; gap: 5px; flex-wrap: wrap; }
+.filters button { font-size: 12.5px; border-radius: 999px; padding: 4px 12px; }
+.filters button.on {
+  background: var(--brown); border-color: var(--brown);
+  color: var(--cream); font-weight: 600;
+}
+.filters button.on .faint { color: var(--cream); opacity: .78; }
+
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 13px; }
+.toolbar .grow { flex: 1; }
+.search-wrap { position: relative; max-width: 340px; flex: 1; }
+
+/* ================================================================== log */
+.log { font-family: var(--mono); font-size: 12px; max-height: 480px; overflow: auto; }
+.log .ev {
+  padding: 5px 15px; border-bottom: 1px solid var(--line-soft);
+  display: grid; grid-template-columns: 118px auto minmax(0, 1fr); gap: 10px;
+}
+.log .ev:last-child { border-bottom: none; }
+.log .t { color: var(--ghost); white-space: nowrap; }
+.log .ev.error   { color: var(--err); }
+.log .ev.warning { color: var(--warn); }
+.log .msg { word-break: break-word; }
+
+/* What a service is holding up: stage, book, and why — the third column is
+   the one that makes it actionable rather than just a list of titles. */
+.held-row {
+  display: grid; grid-template-columns: 92px minmax(150px, 260px) minmax(0, 1fr);
+  gap: 10px; align-items: baseline; padding: 8px 15px;
+  border-bottom: 1px solid var(--line-soft); font-size: 12.5px;
+}
+.held-row:last-child { border-bottom: none; }
+.held-row .chip { justify-self: start; }
+
+/* =============================================================== right rail */
+.rail-card {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
+}
+.rail-card > h3 {
+  margin: 0; padding: 9px 13px; font-size: 11.5px; font-weight: 700;
+  letter-spacing: .5px; text-transform: uppercase; color: var(--brown-3);
+  background: var(--cream-2); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 8px;
+}
+.rail-card > h3 .grow { flex: 1; }
+.rail-card .body { padding: 11px 13px; }
+
+/* =============================================================== toasts */
+#toasts { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
+.toast {
+  background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--teal);
+  border-radius: var(--radius); padding: 10px 13px; font-size: 13px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.18);
+}
+.toast.ok  { border-left-color: var(--ok); }
+.toast.err { border-left-color: var(--err); }
+.toast .tt { font-weight: 700; margin-bottom: 2px; }
+.toast .tb { color: var(--ink-2); font-size: 12.5px; word-break: break-word; }
+
+/* ============================================================== helpers */
+.row { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+.row.tight { gap: 5px; }
+.grow { flex: 1; }
+.muted { color: var(--muted); }
+.faint { color: var(--faint); }
+.ghost { color: var(--ghost); }
+.small { font-size: 12px; }
+.mono { font-family: var(--mono); }
+.gold { color: var(--gold); }
+.mt { margin-top: 13px; }
+.nowrap { white-space: nowrap; }
+.empty { padding: 28px 15px; text-align: center; color: var(--muted); }
+
+.progress { min-width: 160px; }
+.progress .bar { height: 5px; background: var(--cream-2); border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
+.progress .bar span { display: block; height: 100%; background: var(--teal); border-radius: 3px; transition: width .4s ease; }
+.progress .pmeta { font-size: 11.5px; color: var(--muted); }
+.progress .pmeta b { color: var(--ink); }
+
+/* =============================================================== narrow */
+@media (max-width: 1000px) {
+  .page { grid-template-columns: minmax(0, 1fr); }
+  .rail { order: 2; }
+}
+@media (max-width: 780px) {
+  .bar-inner { height: auto; flex-wrap: wrap; padding: 8px 12px; gap: 4px; }
+  .nav { order: 3; width: 100%; overflow-x: auto; }
+  .nav a { padding: 0 11px; font-size: 14px; line-height: 40px; }
+  .bar-search { order: 2; flex: 1; }
+  .bar-search input { width: 100%; max-width: none; }
+  .wordmark { font-size: 19px; }
+  .page { padding: 12px; }
+  .bookpage { grid-template-columns: 1fr; }
+  .bookpage .cover-lg { width: 130px; }
+  .stage-row { grid-template-columns: 1fr; gap: 5px; }
+  .book-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .book-row .side { grid-column: 2; align-items: flex-start; }
+  .svc-row { grid-template-columns: 10px minmax(0, 1fr); }
+  .log .ev { grid-template-columns: 1fr; gap: 2px; }
+  /* Without this the third column kept its `minmax(0,1fr)` share of a width
+     that no longer exists, and the reason text rendered one character per
+     line — a vertical smear of letters down the page. */
+  .held-row { grid-template-columns: 1fr; gap: 3px; padding: 9px 15px; }
+  .held-row .chip { justify-self: start; }
+}

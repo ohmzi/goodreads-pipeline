@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Goodreads — sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Merriweather:wght@400;700&display=swap">
+<link rel="stylesheet" href="/static/app.css?v=__ASSET_VERSION__">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128218;</text></svg>">
+<style>
+  body { display: grid; place-items: center; min-height: 100vh; }
+  .card {
+    /* NB: this was `var(--panel)`, which is not defined in app.css — the card
+       had no background and the shadow fell on bare cream. `--paper` is the
+       token that actually exists. */
+    background: var(--paper);
+    border: 1px solid var(--line-warm);
+    border-radius: var(--radius);
+    padding: 30px 32px; width: min(400px, 92vw);
+    box-shadow: 0 10px 34px rgba(56, 33, 16, .16);
+  }
+  .card h1 {
+    font-family: var(--serif); font-weight: 700; font-size: 25px;
+    margin: 0 0 3px; color: var(--bar-ink);
+  }
+  .card h1 span { color: var(--teal); }
+  .card p.sub { margin: 0 0 22px; color: var(--muted); font-size: 12.5px; }
+  .card button[type=submit] { width: 100%; margin-top: 6px; padding: 10px; font-size: 14px; }
+  #error { margin-top: 14px; color: var(--err); font-size: 13px; min-height: 18px; }
+  .rule { height: 1px; background: var(--line-soft); margin: 22px 0 18px; }
+</style>
+</head>
+<body>
+<form class="card" id="form">
+  <h1>Good<span>reads</span></h1>
+  <p class="sub">Goodreads &rarr; Shelfmark &rarr; your library</p>
+
+  <label class="field">
+    <span class="lbl">Username</span>
+    <input id="username" name="username" type="text" autocomplete="username"
+           autocapitalize="none" autocorrect="off" spellcheck="false" autofocus required>
+  </label>
+
+  <label class="field">
+    <span class="lbl">Password</span>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+  </label>
+
+  <button type="submit" class="primary" id="submit">Sign in</button>
+  <div id="error" role="alert"></div>
+
+  <div class="rule"></div>
+  <p class="faint small" style="margin:0">
+    Repeated failures are rate-limited with a growing delay. A correct password
+    always gets through.
+  </p>
+</form>
+
+<script>
+const form = document.getElementById('form');
+const errorBox = document.getElementById('error');
+const submit = document.getElementById('submit');
+
+fetch('/api/auth/status')
+  .then(r => r.json())
+  .then(s => { if (s.authenticated) location.replace('/'); })
+  .catch(() => {});
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  errorBox.textContent = '';
+  submit.disabled = true;
+  submit.textContent = 'Signing in…';
+  try {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: document.getElementById('password').value,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.ok) { location.replace('/'); return; }
+    errorBox.textContent = data.error || `sign-in failed (HTTP ${response.status})`;
+  } catch (err) {
+    errorBox.textContent = 'could not reach the server: ' + err.message;
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>
