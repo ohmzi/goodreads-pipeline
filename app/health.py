@@ -58,6 +58,40 @@ SERVICE_STAGES = {
 }
 
 
+def _invert_service_stages() -> dict[str, str]:
+    """Which single service a stage cannot make progress without.
+
+    The reverse of `SERVICE_STAGES`, keeping only the stages that appear under
+    exactly one service. Derived rather than written out so the two maps cannot
+    drift apart.
+
+    A stage under more than one service is a fan-out stage and is deliberately
+    absent: `index` and `verify` each talk to up to five apps, and holding them
+    on "any of my services is down" would let one misconfigured app stop the
+    whole chain — the trade `stages/index.py` explicitly refuses to make. A
+    stage absent from this map is one the breaker never gates.
+    """
+    counts: dict[str, int] = {}
+    for stages in SERVICE_STAGES.values():
+        for stage in stages:
+            counts[stage] = counts.get(stage, 0) + 1
+    return {
+        stage: service
+        for service, stages in SERVICE_STAGES.items()
+        for stage in stages
+        if counts[stage] == 1
+    }
+
+
+#: stage -> the one service it depends on, for `breaker` via the pipeline.
+STAGE_SERVICE: dict[str, str] = _invert_service_stages()
+
+
+def service_for_stage(stage: str) -> str:
+    """The one service a stage depends on, or "" if it has no single one."""
+    return STAGE_SERVICE.get(stage, "")
+
+
 def canonical(name: str) -> str:
     """Normalise a service name to the slug used in `SERVICES`.
 
