@@ -46,12 +46,21 @@ VNC_TCP_PORT = 5900
 #: Reachable without a session. Everything else is gated by the middleware.
 #: `/api/auth/status` is here because the sign-in page asks it whether to skip
 #: the form; it reveals nothing but whether the caller already holds a session.
+#:
+#: The two asset files are here for the same reason, and were missing them:
+#: the sign-in page loads its stylesheet from `/static/`, the gate answered
+#: with a 303 to `/login`, the browser followed it and parsed the sign-in page
+#: as CSS — so the page rendered with every `var(--token)` unresolved and every
+#: colour gone. Both files are build artefacts with no user data in them, and
+#: nothing they contain is reachable without a session.
 PUBLIC_PATHS = frozenset({
     "/login",
     "/api/auth/login",
     "/api/auth/status",
     "/api/health",
     "/favicon.ico",
+    "/static/app.css",
+    "/static/app.js",
 })
 
 scheduler = Scheduler(interval=settings.poll_interval)
