@@ -61,13 +61,15 @@ world, not failing:
   for, and where possible how long, because "blocked" with no reason is
   indistinguishable from a wedged stage.
 
-`failed` carries a `failure_kind` — `auth`, `network`, `server`, `notfound`,
-`data`, or empty — and, where one service is to blame, its name. The kind is the
-thing the UI acts on: `auth` needs a human in Settings, `data` is usually a fact
-about the world, and only `auth`, `network` and `server` are treated as
-actionable. `service` is empty for `place`, which is local disk, and for `index`
-and `verify`, which each fan out over several services and name them in the
-detail instead of picking one to blame.
+`failed` carries a `failure_kind` — `auth`, `network`, `server`, `busy`,
+`notfound`, `data`, or empty — and, where one service is to blame, its name. The
+kind is the thing the UI acts on: `auth` needs a human in Settings, `data` is
+usually a fact about the world, and `auth`, `network`, `server` and `busy` are
+treated as actionable. `busy` is a 408/425/429, which is a rate limit rather
+than a refusal: transient, and forgiven on the clock like a 5xx. `service` is
+empty for `place`, which is local disk, and for `index` and `verify`, which
+each fan out over several services and name them in the detail instead of
+picking one to blame.
 
 ## The scheduler
 
@@ -82,6 +84,9 @@ work:
 - **`discover`** every 15 minutes — reads the Goodreads shelf and upserts.
 - **`reconcile`** every 6 hours — compares recorded shelves against Goodreads
   and resets `shelve` on anything that has drifted.
+- **Adopt the breaker backlog** — opens on any recent outage that parked books
+  before the breaker existed, and reclaims them. Idempotent, and it runs after
+  the probe so the breaker is never deciding against stale health.
 
 `POST /api/sweep` forces all three and then sweeps.
 
@@ -123,8 +128,10 @@ arrives:
 
 Resetting a stage resets it and everything downstream of it in `models.STAGES`,
 clearing status, attempts, detail, artifact, `failure_kind`, `service`,
-`queued_at`, `output_path` and the timestamps. That is what both the UI's Retry
-button and `repair` use.
+`held_by`, `queued_at`, `output_path` and the timestamps. That is what both the
+UI's Retry button and `repair` use — including for a stage the breaker was
+holding, which is why a manual Retry during an outage re-holds the book rather
+than doing nothing.
 
 ## discover
 
@@ -192,16 +199,31 @@ Three budgets bound the stage:
 | `MAX_TRANSIENT_HOURS` | 24 | How long an upstream 5xx is forgiven before the book is written off |
 
 **Nothing found** is a fact, not a fault. The stage resets the transient
-counter, then distinguishes the two cases: zero releases at all, versus
-releases that were all rejected as the wrong format — in which case the detail
-names how many were rejected and shows two of them. Both return `kind="data"`,
-which keeps them out of the pile that needs a human.
+counter and reports it as `kind="data"`, which keeps it out of the pile that
+needs a human.
 
-**A 5xx from the search** is the opposite case: Shelfmark routinely answers
-`503 every indexer failed` while the identical search succeeds a moment later.
-Rather than marking books failed for that, the stage blocks with the outage
-duration in the detail, and only after 24 hours of continuous failure does it
-return `kind="server"`. See the transient clock below.
+There are two forms of "nothing found", and both read as the *same* fact.
+Zero releases at all is `no audiobook releases found for '<title>'`. Releases
+that came back and were all rejected as the wrong format — a film wearing an
+audiobook's clothes, an epub for an audiobook search — is the same sentence
+with the rejection detail appended: `no audiobook releases found for '<title>'
+— the 1 release(s) the search returned were not audiobooks. E.g. …`. It used to
+lead with *"but every one was the wrong format — not a book"*, which read as a
+fault with a rejection reason bolted on and put one alarming row per book on
+the panel; an audiobook search that only finds an epub has established that no
+audiobook exists, which is not something a human can act on. The detail names
+how many were rejected and shows two of them, because someone looking at that
+*one* book still wants to know what the search threw away.
+
+**A 5xx or a 429 from the search** is the opposite case: Shelfmark routinely
+answers `503 every indexer failed` while the identical search succeeds a
+moment later, and Anna's Archive answers `429` when too many searches are in
+flight at once. Rather than marking books failed for that, the stage blocks
+with the outage duration in the detail, and only after 24 hours of continuous
+failure does it return `kind="server"`. It also tells the service breaker at
+that point — see below. A `429` is `kind="busy"`, a rate limit rather than a
+refusal, and if the service sent `Retry-After` the breaker's cooldown honours
+it rather than guessing.
 
 **The release fails.** Shelfmark reporting `error`/`failed`/`cancelled` on the
 chosen release is not a dead book — a dead NZB is common and the same title
@@ -461,9 +483,135 @@ The scheduler's version runs after the result is recorded, and it overwrites the
 status on the row directly. A later successful run clears `service` on its own,
 because `mark_done` writes that column unconditionally.
 
-Only `network` and `server` are forgiven this way. `auth` is never forgiven —
-it needs a human — and `data` is a fact about the world that will not improve by
-waiting.
+`network`, `server` and `busy` are forgiven this way. `auth` is never forgiven
+— it needs a human — and `data` is a fact about the world that will not improve
+by waiting.
+
+## The service breaker
+
+The transient clock above measures **one book's patience**. The breaker in
+`app/breaker.py` measures something else: **whether a service is usable at
+all**. They are deliberately separate, and they never both run for one failure.
+
+The distinction exists because of what the first one alone produces. When
+Anna's Archive stopped resolving from the host, Shelfmark's every release
+search answered `503 Unable to reach download source`. Each of the 169 affected
+books ran its own acquire stage, waited out its own 24-hour clock and then
+parked, so one unreachable host arrived as 155 book titles on the panel and a
+dashboard tile reading "169 books need a human". The bug was not the outage; it
+was that a *service-level* condition was stored, aged and reported as a
+*book-level* one, 169 times over.
+
+So the clock moved to where the fault actually is. One row per service in
+`service_breaker`, shared by every book:
+
+| | breaker | transient clock |
+|---|---|---|
+| Scope | one service, all books | one book, one stage |
+| Question | "is this service usable right now?" | "has this failed long enough to be the book's problem?" |
+| Action | do not attempt the stage at all | attempt, then write `blocked` instead of `failed` |
+| Ceiling | a cooldown, capped at 1 h | 24 h, then the failure stands |
+
+The state machine is `closed → open → half_open → closed`:
+
+- **closed** — normal. Three *consecutive* transient failures against one named
+  service, each within a day of the one before it, with no `ok` in between,
+  trip it. `ADVANCE_WORKERS` is 6, so a real outage clears that inside its
+  first batch; one book's unlucky 500 against an otherwise healthy service
+  leaves the counter at 1 and the transient clock handles it exactly as before.
+- **open** — no stage that depends on that service is run. Books already
+  failing for it are *reclaimed* into `blocked` rows with `held_by` set, so the
+  panel stops reading them as failures, and every sweep from then on costs one
+  dial per cooldown instead of one per book.
+  The sweep that *begins* the outage is the exception and worth stating
+  plainly, because it used to be written as "one more book": `_sweep` takes its
+  `holding` snapshot before its workers start, so on that first sweep nothing
+  is held yet and nothing is gated, and `acquire._run` can only check the
+  breaker *after* its dial — the 503 that says the service is down is the same
+  call that spent the search. Every book that sweep reaches is therefore dialed
+  once, and during a rate-limit outage each of those is one more search into
+  the hole. Measured at 155 in this operator's library, and pinned at 24 in
+  `test_one_probe_per_cooldown_however_many_books_are_waiting`. It is one dial
+  per book per *outage*, not per sweep, three of those dials are the evidence
+  that trips the breaker at all, and none of them writes a book off — the
+  failures are downgraded to holds. What it costs is upstream requests.
+- **half_open** — after the cooldown, exactly one book is allowed to run one
+  stage. That probe is the only honest test of whether the service is back: a
+  green `/api/health` is not, as the Shelfmark instance proves (its container
+  answered `200` in 5 ms throughout the outage — the fault was upstream of it).
+  The probe's verdict comes from the *raw* result and only from evidence the
+  service itself produced: `ok`, the service's own `auth` and `notfound`, a
+  download already queued with it, and — since the first version of this
+  verdict held the opposite and silently wedged healthy libraries — a `data`
+  failure the stage says it *dialed* for (`StageResult.answered`), which is
+  what "no release exists in any configured source" is. A transient failure, a
+  result that never reached the service (the free-space check that runs before
+  the search, an unhandled stage error), and a hold the stage took on the
+  breaker's behalf all re-open it on a doubled cooldown. The probing book is
+  never failed for it.
+  `data` is why the flag exists rather than a rule about kinds: the free-space
+  check and the empty search return the same kind from the same function, and
+  only one of them asked.
+
+The cooldown doubles from 5 minutes to a 1-hour cap, and any `Retry-After` the
+service sends wins if it is longer. A claimed probe that never answers is
+released after 15 minutes, so a process restart mid-probe cannot wedge it.
+
+**There is also a way out by hand**, because everything above closes a breaker
+by *proving* something, and the failure mode left over is a breaker nothing can
+prove anything about: it holds a working service, nothing logs an error, and no
+clock, restart or button ends it. `breaker.clear` — `POST
+/api/services/{name}/breaker/clear`, offered as **Clear hold** on the held row
+and on the service page, behind a confirmation — releases the books exactly as
+a recovery does, including the per-book clock reset, and is honest about what
+it did rather than what the operator might hope: the log line is a `warning`
+carrying the reason, the response says the service has *not* been proved up,
+and `last_ok_at` is left where it was. If the service really is down the next
+sweep trips it again at the base cooldown, on fresh evidence.
+
+Three things keep it from being the thing that hides a broken upstream:
+
+- while it is open, `_sweep` records **one** event naming the service, instead
+  of one per book;
+- the panel shows **one** row per held service, with the held books listed
+  under it, and its `fix` line changes once the outage outlives the 24-hour
+  grace to point at the service itself;
+- `adopt_backlog()` runs once per sweep and trips on recent `failed` rows the
+  breaker never witnessed — the 169 that were already parked when it was
+  deployed. A parked book is never attempted again, so it can never feed a
+  failure in, and without this the breaker would sit closed while the panel
+  showed them.
+
+**Closing clears the per-book clock** for everything the outage was holding. A
+`blocked` stage is not satisfied, so `_advance` picks it up on the very next
+sweep with no operator action; but a book whose `transient_since` was set
+during the outage would otherwise be at 25 hours the first time it failed
+afterwards and would park on the spot, having "failed for 25 hours" without
+having been tried for 24 of them. That reset is scoped to the service that was
+holding — nothing a book earned on its own is forgiven by it.
+
+What the breaker deliberately does **not** do:
+
+- **`auth` never trips it** and is never reclaimed. A wrong API key is a
+  misconfiguration a human must fix, and it stays loud at whatever scale it
+  happens.
+- **`data` is never reclaimed.** "No audiobook exists", "every candidate was
+  the wrong format" and "Shelfmark reported error after 4 releases" are facts
+  about releases. They keep their own groups and their own fix text; they
+  simply stop growing while the service is held, because no new release is
+  attempted.
+- **`index` and `verify` are not gated.** They fan out over up to five apps,
+  and holding the whole chain because one is down is the trade `index.py`
+  explicitly refuses to make. The honest version needs a per-book dependency
+  set declared by the stage.
+- **`ADVANCE_WORKERS` is not lowered.** Six concurrent searches is what makes a
+  429 likely, but throttling it would slow every healthy sweep to pay for an
+  outage. The breaker is the sharper version of the same idea — once a service
+  is held it runs *zero* books at a time — and it reverts by itself.
+
+The state is visible two ways without parsing prose: `breaker` in the sweep
+summary at `/api/state`, and a `breaker` object on each entry of
+`/api/health/services` and `/api/services/{name}`.
 
 ## Self-healing inside stages
 
