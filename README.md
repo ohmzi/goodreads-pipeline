@@ -85,8 +85,10 @@ personal account. What that buys:
   was published on `0.0.0.0:6080`, which would have let anyone on the LAN
   drive a browser logged into Goodreads.
 - All of `/api`, the pages, `/static` and `/vnc` require a session. Only
-  `/login`, `/api/auth/login`, `/api/auth/status`, `/api/health` and
-  `/favicon.ico` are open.
+  `/login`, `/api/auth/login`, `/api/auth/status`, `/api/health`,
+  `/favicon.ico` and the two assets `/static/app.css` and `/static/app.js` are
+  open — the sign-in page loads its stylesheet from `/static/`, and behind
+  the gate it rendered unstyled for exactly the people who needed it.
 
 ### Known limits
 
@@ -146,7 +148,8 @@ Three deliberate choices hold that up:
 ## The UI
 
 Four views, plus per-book and per-service detail pages, themed after Goodreads —
-warm brown surfaces, cream text, one gold accent, serif titles. No framework and
+a white page with a `#faf8f6` header and footer, cream `#f4f1ea` callouts, brown
+ink, teal links, and Merriweather titles over Lato body text. No framework and
 no build step: it is a few render functions and a polling loop, served straight
 from `app/static/`.
 

@@ -124,7 +124,8 @@ gated by one middleware (`app/main.py:94-106`).
 | `/api/auth/login` | The route the form posts to |
 | `/api/auth/status` | The sign-in page asks whether to render the form; the answer reveals only whether the caller already holds a session |
 | `/api/health` | The container healthcheck (`docker-compose.yml:38-40`) |
-| `/favicon.ico` | Allowlisted, but no route serves it — it falls through to the catch-all and returns the index page with status 200 |
+| `/favicon.ico` | `GET /favicon.ico` serves the real icon, long-cached (`app/main.py:361-374`) |
+| `/static/app.css`, `/static/app.js` | Open so the sign-in page can load them before a session exists — it loads its stylesheet from `/static/`, and the gate answering with a 303 to `/login` made the browser parse the sign-in page itself as CSS. Both are static files carrying no state. The rest of `/static` stays gated |
 
 The allowlist is an exact string match on the path, so a query string does not
 change the answer (`/api/health?x=1` is public) and neither does case
@@ -140,7 +141,7 @@ That split is the reason a script should read status codes rather than bodies:
 `401` means "sign in and retry", `303` means "you asked for a page".
 
 `GET /api/version` reports what the running instance is serving — the static
-asset stamp and the app version (`app/main.py:344-347`). It is gated like every
+asset stamp and the app version (`app/main.py:348-351`). It is gated like every
 other `/api/` route. `GET /api/health` is the unauthenticated liveness probe:
 it returns `{"status": "ok"}` and touches nothing else — not the database, not a
 service — so a green healthcheck proves uvicorn is answering and nothing more
@@ -149,7 +150,7 @@ integrations is a different route with its own probe.
 
 ## Routes
 
-32 routes and one static mount (`app/main.py`, counted from the decorated
+33 routes and one static mount (`app/main.py`, counted from the decorated
 functions). Grouped by area.
 
 ### Auth
@@ -170,7 +171,8 @@ outcomes are logged: failures at `warning`, successes at `info`.
 | Method | Path | Session | Request | Returns |
 |---|---|---|---|---|
 | GET | `/api/state` | yes | — | The whole dashboard payload — see below |
-| GET | `/api/version` | yes | — | `{"asset_version": "<10 hex chars>", "app": "goodreads", "version": "1.0.0"}` |
+| GET | `/api/version` | yes | — | `{"asset_version": "<10 hex chars>", "app": "goodreads", "version": "1.1.0"}` |
+| GET | `/api/version/history` | yes | — | `{"current": "1.1.0", "releases": [{"version": "1.1", "date": "2026-09-20", "summary": str, "sections": [{"heading": str, "items": [str]}]}]}` — newest first, transcribed by hand from docs/VERSION.md (`app/version_data.py`) |
 | GET | `/api/issues` | yes | — | `{"groups": [...], "counts": {...}, "needs_review": [...]}` |
 | GET | `/api/categories` | yes | — | `{"categories": {...}, "fallback": ...}` — `app/categories.yml` verbatim (`app/main.py:900-904`) |
 
@@ -180,7 +182,7 @@ when the Python does, so it identifies a build's front end rather than the
 process. The process's own version is the FastAPI app version
 (`app/main.py:39`).
 
-`GET /api/state` is what the UI polls, every 6 seconds (`app/static/app.js:1182`):
+`GET /api/state` is what the UI polls, every 6 seconds (`app/static/app.js:1517`):
 
 | Key | Type | Contents |
 |---|---|---|
@@ -189,6 +191,7 @@ process. The process's own version is the FastAPI app version
 | `stages` | array | `models.STAGES` in pipeline order (`app/models.py:12-23`) |
 | `categories` | array | Category names from `categories.yml`, sorted |
 | `auto_shelve` | bool | The global switch, from the `settings` table |
+| `version` | string | The app version, the same literal `/api/version` reports; the UI's rail pill and footer read it on first paint |
 | `disk_free_gb` | number | Free space on the books root, one decimal |
 | `health` | object | `health.summary()` — the same object `GET /api/health/services` returns |
 | `totals` | object | `books`, `complete`, `partial`, `unavailable`, `in_flight`, `failed`, `needs_review`, `shelved` |

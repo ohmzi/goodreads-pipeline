@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import auth, breaker, models, version_data
+from . import __version__, auth, breaker, models, version_data
 from .clients.abs_client import AudiobookshelfClient
 from .clients.base import ClientError
 from .clients.booklore import BookLoreClient, GrimmoryClient
@@ -36,7 +36,7 @@ from .pathing import free_space_gb
 from .pipeline import Scheduler
 from .stages import shelve as shelve_stage
 
-app = FastAPI(title="Goodreads", version="1.0.0")
+app = FastAPI(title="Goodreads", version=__version__)
 
 STATIC_DIR = APP_DIR / "static"
 NOVNC_ROOT = Path("/usr/share/novnc")
@@ -550,6 +550,7 @@ def state() -> dict:
         "stages": list(models.STAGES),
         "categories": sorted((settings.load_categories().get("categories") or {}).keys()),
         "auto_shelve": shelve_stage.auto_shelve_enabled(),
+        "version": app.version,
         "disk_free_gb": round(free_space_gb(settings.books_root), 1),
         "health": health_summary(),
         "totals": _totals(books),

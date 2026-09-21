@@ -268,6 +268,14 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
    is used for the ids, paths and timestamps the app prints. */
 .mono { font-family: var(--mono); }
 
+/* Visually hidden but still read: screen-reader-only text, for the toast
+   region's live-region label and anything else that needs an accessible name
+   with no visible box. No Goodreads equivalent — their pages do not need one. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
 /* --gold-ink, not --gold: #ffd767 is 1.47:1 on white and unreadable as text.
    #B38B22 is the darkest gold Goodreads verifies, at 3.17:1 — which clears AA
    for the 24px numeral it carries (.tile.gold .n, below, which re-declares
@@ -533,6 +541,10 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
    account block to the right edge. */
 .spacer { flex: 1; }
 
+/* Only shown under 1000px (see the breakpoints section), where the search box
+   drops to its own row behind a toggle instead of narrowing forever. */
+.search-toggle { display: none; }
+
 /* No Goodreads equivalent — the always-visible answer to "is anything broken
    right now", one click from the page that explains and logs it. Geometry
    derived from .gr-button geometry at .gr-button--small's inset (3px radius,
@@ -579,6 +591,27 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
 /* The session age (or "not signed in") is the part that matters, so it takes the
    header's own brown ink: #382110 on #faf8f6 is 14.23:1 (§7). */
 .bar-account .who b { color: var(--bar-ink); }
+
+/* ============================================================== the footer
+   Sibling of .page, not a cell in it (see index.html): it spans the full
+   width and sits under the rail at every breakpoint, in place of the page
+   just ending. --bar is the same light fill the header bar uses (their own
+   .siteHeader__topLine), so the two bookend the page in the same tone. */
+.site-footer { background: var(--bar); padding: 32px 0; margin-top: 24px; }
+.site-footer-inner {
+  max-width: var(--header-max); margin: 0 auto; padding: 0 5px;
+  display: grid; grid-template-columns: repeat(3, 1fr) 1fr; gap: var(--gutter);
+}
+.site-footer h4 {
+  margin: 0 0 10px; font: 700 12px/18px var(--sans);
+  text-transform: uppercase; letter-spacing: .3px; color: var(--bar-ink);
+}
+.site-footer a { display: block; font: 14px/21px var(--sans); color: var(--bar-ink); text-decoration: none; }
+.site-footer a:hover { text-decoration: underline; color: var(--bar-ink); }
+/* --muted, not --faint: --faint measures 4.29:1 on --bar and fails §7, the
+   same reason .bar-account .who takes --muted instead a few lines up. */
+.site-footer .legal { text-align: right; font: 14px/21px var(--sans); color: var(--muted); }
+.site-footer .legal a { display: inline; color: var(--teal); }
 
 /* ============================================================ the controls
  *
@@ -900,6 +933,15 @@ a.chip.svc-tag:active {
 .body.tight { padding: 8px 15px; }
 .body.flush { padding: 0; }   /* .body.flush.log — the log rows carry their own inset */
 
+/* Cream is a callout here, never the page. */
+.callout {
+  background: var(--cream); border: 0; border-radius: 3px;
+  padding: 12px 15px; font-size: 13px; line-height: 1.5;
+  color: var(--ink-2); margin-bottom: 14px;
+}
+.callout p { margin: 0; }
+.callout p + p { margin-top: 8px; }
+
 /* ================================================================ tiles */
 /* Button-shaped tiles on a .orderConfirmation__card panel: same white, same 4px. */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 9px; margin-bottom: 14px; }
@@ -966,8 +1008,9 @@ a.chip.svc-tag:active {
    white, 1px #cccccc, 3px, and their one floating shadow. */
 #toasts { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
 .toast {
+  position: relative;
   background: var(--paper); border: 1px solid var(--line-menu); border-radius: var(--radius);
-  box-shadow: var(--shadow-float); padding: 10px 13px; font-size: 13px;
+  box-shadow: var(--shadow-float); padding: 10px 32px 10px 13px; font-size: 13px;
 }
 /* derived: the edge is the ink of the alert surface the toast is reporting, so a
    toast and a banner about the same thing share a colour. The old --ok green
@@ -977,6 +1020,15 @@ a.chip.svc-tag:active {
 .toast.err { border-left: 3px solid var(--err); }
 .toast .tt { font-weight: 700; margin-bottom: 2px; }
 .toast .tb { color: var(--ink-2); font-size: 12.5px; word-break: break-word; }
+/* Every toast can be dismissed; an error one is the case that matters, since
+   it otherwise sits on screen until its own (longer) timeout. */
+.toast .tclose {
+  position: absolute; top: 4px; right: 4px;
+  min-width: 24px; min-height: 24px; padding: 0;
+  border: 0; background: none; font-size: 16px; line-height: 1;
+  color: var(--muted); cursor: pointer;
+}
+.toast .tclose:hover { color: var(--ink); background: none; border: 0; }
 
 /* ========================================================= tabs + toolbar */
 /* ref §4 .reviewControls — the My Books toolbar: one #DFDFDF rule under it,
@@ -1065,9 +1117,11 @@ a.chip.svc-tag:active {
    the app's own. */
 .log { font-family: var(--mono); font-size: 12px; max-height: 480px; overflow: auto; }
 .log .ev {
-  padding: 5px 15px; border-bottom: 1px solid var(--line-soft);
-  display: grid; grid-template-columns: 118px auto minmax(0, 1fr); gap: 10px;
+  padding: 7px 15px; border-bottom: 1px solid var(--line-soft);
+  display: grid; grid-template-columns: 104px 110px minmax(0, 1fr); gap: 10px;
+  align-items: baseline;
 }
+.log.no-svc .ev { grid-template-columns: 104px minmax(0, 1fr); }
 .log .ev:last-child { border-bottom: none; }
 .log .t { color: var(--ghost); white-space: nowrap; }
 .log .msg { word-break: break-word; }
@@ -1603,6 +1657,9 @@ a.chip.svc-tag:active {
 }
 .held-row:last-child { border-bottom: none; }
 .held-row .chip { justify-self: start; }
+.held-row a { font: 700 13px/1.3 var(--serif); color: var(--ink-2); }
+.held-row a:hover { color: var(--teal); }
+.reason-err { color: var(--err); }
 
 /* =============================================================== right rail */
 /* .rail-card and its heading are declared with .panel and .panel > h2 in the

@@ -2,10 +2,50 @@
 
 goodreads watches a Goodreads **to-read** shelf and carries each book through to
 a shelved, indexed library — Shelfmark, classify, place, index, notebook, shelve
-— without ever making a second copy of a file. Current version: **v1.0**.
+— without ever making a second copy of a file. Current version: **v1.1**.
 
 Newest version first. Each release gets a section in the same shape as v1.0
 below: a date line, then one-line bullets under area headings.
+
+## v1.1
+
+2026-09-21
+
+### Reliability
+
+- A per-service circuit breaker: three consecutive transient failures against one service holds every book waiting on it, instead of each one failing, waiting out its own clock and parking independently. A restart or a resolved outage is caught by a half-open probe on one book; a stuck hold can be released by hand from the service's page.
+- The issues panel folds every book a held service is blocking into one row naming the service, with a fix message that escalates once the outage outlives the 24-hour transient grace instead of saying "nothing to do" forever.
+- A 408/425/429 from a source is now its own failure kind (`busy`) instead of falling through unclassified, and a `Retry-After` header is parsed and honoured.
+
+### Classification
+
+- A precedence rule in `categories.yml`: any genre that names fiction resolves to Fiction ahead of the longest-needle scan, so a book tagged both "Historical Fiction" and "Fiction" no longer files under History on the strength of the longer word.
+- The new `reclassify` CLI command re-runs classification over the whole library against the current rules and reports (or, with `--apply`, makes) the moves needed to match.
+
+### Sign-in
+
+- The sign-in page is rebuilt against the real goodreads.com sign-in page, measured rather than approximated: a white page, a narrow centred column, no card, no cream — matching its actual geometry down to the wordmark, heading and input sizes.
+- A working "Keep me signed in." checkbox: leaving it ticked keeps the existing 7-day session, unticking it issues a 12-hour one instead.
+- The browser tab icon is goodreads.com's own, served from a real `/favicon.ico` route instead of an inline placeholder.
+
+### Interface
+
+- Page chrome follows goodreads.com's classic system: a white page, cream `#f4f1ea` callouts, a `#faf8f6` header and footer, 1px `#d8d8d8` borders, and a lowercase Merriweather "goodreads" wordmark.
+- A footer on every page with the section links, the project links and the running version, in place of the page just ending.
+- Book rows read like shelf rows (2:3 cover, serif title, Lato byline, eight stage dots with a count) and the book page puts the cover, retry action and Goodreads link in a left column beside a serif title and a genre link row.
+- Six-second polling no longer wipes what you typed into a credential field or drops keyboard focus: identical renders are skipped and typed values and focus are restored.
+
+### Version page
+
+- `#/version` lists every release with its date and a one-line summary, changes grouped by area, the running build tagged current.
+- The right rail shows the running version with a "What's new" dot that clears once the page has been opened in this browser.
+- `/api/state` carries `version` and FastAPI reads the version from `app/__init__.py`.
+
+### Accessibility and polish
+
+- Every link, button, input, row and tile has a visible 2px teal keyboard focus ring; service cards are real links; pages set their own tab title and move focus to the page title after navigation.
+- Toasts are announced to screen readers, can be dismissed, pause on hover, and error toasts stay until closed.
+- The Goodreads browser page shows an idle state with the three steps and the start button in place of a black frame.
 
 ## v1.0
 
@@ -126,6 +166,7 @@ below: a date line, then one-line bullets under area headings.
 
 | Version | Date | Summary |
 |---|---|---|
+| v1.1 | 2026-09-20 | Goodreads-faithful redesign: sign-in page rebuilt, white page chrome with a footer, structured version page, a narrow-screen header, and keyboard focus states. |
 | v1.0 | 2026-09-20 | Initial release. Goodreads to-read shelf to a shelved, indexed library, one file per book, no copies. |
 
 ## Releasing a new version
@@ -136,12 +177,11 @@ below: a date line, then one-line bullets under area headings.
    no paragraphs.
 2. Add a row to the top of the **Version history** table with the version, the
    date, and a one-line summary of what that release changed.
-3. Bump the version string the app serves, currently `1.0.0`. `/api/version`
-   reports the running build as `{"app": "goodreads", "version": ...,
-   "asset_version": ...}`: the version is the literal in `FastAPI(version=...)`
-   in `app/main.py`, which `__version__` in `app/__init__.py` mirrors, and
-   `asset_version` is a short hash of `app.js` and `app.css` that changes on its
-   own whenever either file changes. The number is not read from this file, so
-   the two have to be kept in step by hand.
+3. Bump `__version__` in `app/__init__.py`, currently `1.1.0`. It is the only
+   version literal: `FastAPI(version=__version__)`, `/api/version` and
+   `/api/state` all read it, and `asset_version` is a short hash of `app.js`
+   and `app.css` that changes on its own whenever either file changes. Then add
+   the matching entry at the top of `VERSION_HISTORY` in `app/version_data.py`
+   (major.minor, e.g. `"1.1"`).
 4. Nothing else is derived from the version. There is no migration step tied to
    it.

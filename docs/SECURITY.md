@@ -119,12 +119,17 @@ Notes on why it is shaped this way:
   (`app/main.py:139`, `app/main.py:162`).
 
 Access control is one middleware rule: everything needs a session except
-`/login`, `/api/auth/login`, `/api/auth/status`, `/api/health` and
-`/favicon.ico` (`app/main.py:49`, `app/main.py:94`). That covers the pages,
-`/static`, `/api/*` and the VNC bridge. Unauthenticated API and VNC requests get
-a 401, other paths get redirected to the login form. `/api/auth/status` is
-public because the login page asks it whether to render the form; it answers
-only whether the caller already holds a session.
+`/login`, `/api/auth/login`, `/api/auth/status`, `/api/health`,
+`/favicon.ico`, `/static/app.css` and `/static/app.js`
+(`app/main.py:49`, `app/main.py:94`). That covers the pages, the rest of
+`/static`, `/api/*` and the VNC bridge. Unauthenticated API and VNC requests
+get a 401, other paths get redirected to the login form. `/api/auth/status`
+is public because the login page asks it whether to render the form; it
+answers only whether the caller already holds a session. The two asset files
+are public because the sign-in page loads its stylesheet from `/static/` and
+rendered unstyled while it was gated (the gate answered with a 303 to
+`/login`, and the browser parsed the sign-in page itself as CSS); both are
+static files with no state in them.
 
 **There is no default account.** No account is seeded at startup, no
 first-visitor-becomes-admin path exists, and if zero users exist the app logs an

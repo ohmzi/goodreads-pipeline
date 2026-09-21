@@ -37,6 +37,16 @@ let versionHistory = null;     // the last /api/version/history payload
  * "Re-check all" are two buttons for the same endpoint and both are on screen
  * at once on #/services, so the last one to finish is the one that lowers it. */
 let healthChecks = 0;
+let announcedVersion = null;   // the version this page was loaded against
+let viewTitle = '';            // set by the views that know a better title than the route
+let navigated = false;         // true for a hash navigation only, never for a poll
+let renderPending = false;     // a poll render held back while a field had focus
+let lastRoute = '';
+
+const TITLES = {
+  dashboard: 'Home', books: 'My Books', services: 'Services',
+  activity: 'Activity', version: 'Version history',
+};
 
 const BASE = '';
 
@@ -47,14 +57,89 @@ function escapeHtml(text) {
   ));
 }
 
+/* One shape for "loading", "nothing here" and "that failed", so a screen
+ * reader hears the same thing in every view and the CSS has one target. */
+function stateBlock(kind, text, action = '') {
+  return `<div class="state ${kind}" role="${kind === 'error' ? 'alert' : 'status'}">` +
+    (kind === 'error' ? '<span class="dot err" aria-hidden="true"></span>' : '') +
+    `<span>${escapeHtml(text)}</span>${action}</div>`;
+}
+
+/* The title block every list view opens with. `sub`, `crumbs` and `extra` are
+ * HTML the caller has already escaped; only the title is escaped here. */
+function pageHead(title, sub = '', crumbs = '', extra = '') {
+  return `<div class="page-head">${crumbs ? `<div class="crumbs">${crumbs}</div>` : ''}` +
+    `<div class="title-row"><h1 tabindex="-1">${escapeHtml(title)}</h1>${extra}</div>` +
+    `${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
+}
+
+/* Every 6 seconds a poll re-renders the whole view. Assigning innerHTML blindly
+ * wiped a half-typed API key and threw focus back to the top of the page, which
+ * made the credentials form unusable. So: skip the swap when the markup is
+ * byte-identical, and when it is not, carry typed values and the focused
+ * element (matched by a stable key, not by index) across it. */
+const lastHtml = {};
+
+function focusKeyOf(el, root) {
+  if (!el || el === document.body || !root.contains(el)) return null;
+  return el.dataset.key || el.id || el.getAttribute('href') ||
+    (el.tagName + '|' + (el.getAttribute('onclick') || '') + '|' + el.textContent.trim());
+}
+
+function setHtml(el, html) {
+  if (!el) return;
+  if (lastHtml[el.id] === html) return;
+  const typed = $$('input[data-key]', el).filter(i => i.value !== '').map(i => [i.dataset.key, i.value]);
+  const active = document.activeElement;
+  const key = focusKeyOf(active, el);
+  const sel = key && active.tagName === 'INPUT' && typeof active.selectionStart === 'number'
+    ? [active.selectionStart, active.selectionEnd] : null;
+
+  el.innerHTML = html;
+  lastHtml[el.id] = html;
+
+  typed.forEach(([k, v]) => {
+    const i = el.querySelector(`input[data-key="${CSS.escape(k)}"]`);
+    if (i) i.value = v;
+  });
+  if (key) {
+    const target = $$('a,button,input,select,textarea,[tabindex]', el).find(e => focusKeyOf(e, el) === key);
+    if (target) {
+      target.focus({ preventScroll: true });
+      if (sel && typeof target.setSelectionRange === 'function') {
+        try { target.setSelectionRange(sel[0], sel[1]); } catch {}
+      }
+    }
+  }
+}
+
+function isEditing() {
+  const a = document.activeElement;
+  const v = $('#view');
+  return !!(a && v && v.contains(a) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(a.tagName));
+}
+
 function toast(title, body = '', kind = '') {
   const host = $('#toasts');
+  if (!host) return;
   const el = document.createElement('div');
   el.className = 'toast ' + kind;
+  el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
   el.innerHTML = `<div class="tt">${escapeHtml(title)}</div>` +
-                 (body ? `<div class="tb">${escapeHtml(body)}</div>` : '');
+                 (body ? `<div class="tb">${escapeHtml(body)}</div>` : '') +
+                 '<button class="tclose" type="button" aria-label="Dismiss notification">&times;</button>';
+  const remove = () => el.remove();
+  el.querySelector('.tclose').addEventListener('click', remove);
   host.appendChild(el);
-  setTimeout(() => el.remove(), kind === 'err' ? 11000 : 6000);
+  if (kind === 'err') return;                    // an error stays until it is dismissed
+  const ms = 6000;
+  let t = setTimeout(remove, ms);
+  const pause = () => clearTimeout(t);
+  const resume = () => { t = setTimeout(remove, ms); };
+  el.addEventListener('mouseenter', pause);
+  el.addEventListener('focusin', pause);
+  el.addEventListener('mouseleave', resume);
+  el.addEventListener('focusout', resume);
 }
 
 async function api(path, opts) {
@@ -94,6 +179,17 @@ function relTime(iso) {
 
 function stamp(ts) {
   return String(ts || '').replace('T', ' ').slice(5, 19);
+}
+
+/* The release notes are keyed by major.minor ("1.1") while the running app
+ * reports a patch version ("1.1.0"); comparing the strings marked nothing as
+ * current. */
+const majorMinor = v => String(v ?? '').replace(/^v/i, '').split('.').slice(0, 2)
+  .map(n => parseInt(n, 10) || 0).join('.');
+
+function fmtDate(iso) {
+  const d = new Date(String(iso || '') + 'T00:00:00');
+  return isNaN(d) ? String(iso || '') : d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 /* A download in flight, with a real percentage and a projected finish.
@@ -137,6 +233,24 @@ const KIND_LABEL = {
   notfound: 'not found',
   data: 'no data',
 };
+
+/* Credential fields, grouped by the service they belong to: prefix, service
+ * key (empty when the service is not probed), display name. The prefixes are
+ * the CREDENTIAL_FIELDS keys in app/main.py; anything unmatched falls into a
+ * trailing "Other" group rather than disappearing. */
+const CRED_GROUPS = [
+  ['kavita_', 'kavita', 'Kavita'],
+  ['booklore_', 'booklore', 'BookLore'],
+  ['grimmory_', 'grimmory', 'Grimmory'],
+  ['abs_', 'audiobookshelf', 'Audiobookshelf'],
+  ['opennotebook_', 'opennotebook', 'Open Notebook'],
+  ['goodreads_', 'goodreads', 'Goodreads AppSync'],
+  ['googlebooks_', '', 'Google Books'],
+  ['hardcover_', '', 'Hardcover'],
+  ['sabnzbd_', '', 'SABnzbd'],
+  ['prowlarr_', '', 'Prowlarr'],
+];
+const CRED_LEFT = new Set(['kavita_', 'booklore_', 'grimmory_', 'abs_', 'opennotebook_']);
 
 /* Mirrors health.canonical() in the Python. The client classes name
  * themselves in prose ("open notebook") while the service registry uses a
@@ -245,33 +359,52 @@ function renderMasthead() {
   const health = state?.health;
   const bad = health ? health.unhealthy.length : 0;
 
-  $('#nav').innerHTML = nav.map(([href, label, key]) =>
-    `<a href="#${href}" class="${name === key || (key === 'services' && name === 'service') ? 'active' : ''}">${label}` +
-    (key === 'services' && bad ? ` <span class="chip failed">${bad}</span>` : '') +
-    `</a>`).join('');
+  setHtml($('#nav'), nav.map(([href, label, key]) => {
+    const on = name === key || (key === 'services' && name === 'service');
+    return `<a href="#${href}"${on ? ' class="active" aria-current="page"' : ''}>${label}</a>`;
+  }).join(''));
 
-  const g = state?.goodreads || {};
-  $('#headline').innerHTML = g.has_session
-    ? `Goodreads<br><b>${escapeHtml(g.session_age)}</b>`
-    : `Goodreads<br><b>not signed in</b>`;
-
-  // The always-visible answer to "is anything broken right now".
+  // The always-visible answer to "is anything broken right now". Below 600px
+  // only the dot and the count survive, so both have to carry the state.
   const pill = $('#health-pill');
+  if (!pill) return;
+  const dot = c => `<span class="dot ${c}" aria-hidden="true"></span>`;
+
+  let cls = 'health-pill';
+  let html;
+  let label;
   if (!health || !health.services.length) {
-    pill.className = 'health-pill';
-    pill.innerHTML = '<span class="dot idle"></span> Services';
-    return;
-  }
-  if (bad) {
+    html = dot('idle') + '<span class="label">Services</span>';
+    label = 'Service status';
+  } else if (bad) {
     const auth = (health.auth_failures || []).length;
-    pill.className = 'health-pill bad';
-    pill.innerHTML = `<span class="dot err"></span> ${bad} service${bad > 1 ? 's' : ''} ` +
-      (auth ? `rejecting credentials` : `unreachable`);
-    return;
+    const net = bad - auth;
+    const parts = [
+      auth && `${auth} credential problem${auth > 1 ? 's' : ''}`,
+      net && `${net} unreachable`,
+    ].filter(Boolean);
+    cls = 'health-pill ' + (auth ? 'bad' : 'warn');
+    html = dot(auth ? 'err' : 'warn') +
+      `<span class="n">${bad}</span><span class="label">${parts.join(' · ')}</span>`;
+    label = `${bad} service problem${bad > 1 ? 's' : ''}: ${parts.join(', ')}`;
+  } else {
+    const total = health.services.length;
+    html = dot('ok') + `<span class="label">${total} service${total > 1 ? 's' : ''} healthy</span>`;
+    label = `${total} services healthy`;
   }
-  const total = health.services.length;
-  pill.className = 'health-pill';
-  pill.innerHTML = `<span class="dot ok"></span> ${total} service${total > 1 ? 's' : ''} healthy`;
+  pill.className = cls;
+  if (pill.innerHTML !== html) pill.innerHTML = html;
+  pill.setAttribute('aria-label', label);
+}
+
+/* Under 1000px the search box drops to its own row, hidden until asked for. */
+function toggleSearch() {
+  const bar = $('.bar');
+  if (!bar) return;
+  const open = bar.classList.toggle('search-open');
+  const btn = $('.search-toggle');
+  if (btn) btn.setAttribute('aria-expanded', String(open));
+  if (open) $('#global-search')?.focus();
 }
 
 /* The single most important piece of feedback in the app: if a credential is
@@ -280,47 +413,53 @@ function renderBanner() {
   const host = $('#banner');
   const health = state?.health;
   if (!host) return;
-  if (!health) { host.innerHTML = ''; return; }
+  if (!health) { setHtml(host, ''); return; }
 
   const authFails = health.auth_failures || [];
   const down = health.unhealthy || [];
+  const r = route();
 
   if (authFails.length) {
-    host.innerHTML = `
+    // On the page that already shows the field, a button pointing at it is noise.
+    const onThis = r.name === 'service' && authFails.some(s => s.service === canonicalService(r.param));
+    let action = '';
+    if (onThis) action = '';
+    else if (r.name === 'services') action = `<button class="primary" onclick="document.getElementById('settings-body')?.scrollIntoView({behavior:'smooth',block:'start'})">Fix credentials</button>`;
+    else if (authFails.length === 1) action = `<button class="primary" onclick="go('/service/${authFails[0].service}')">Fix credentials</button>`;
+    else action = `<button class="primary" onclick="go('/services')">Fix credentials</button>`;
+
+    setHtml(host, `
       <div class="banner err">
-        <span class="dot err"></span>
-        <span><b>${authFails.length} service${authFails.length > 1 ? 's' : ''} rejecting credentials</b>
+        <span class="txt"><span class="dot err" aria-hidden="true"></span>
+        <b>${authFails.length} service${authFails.length > 1 ? 's' : ''} rejecting credentials</b>
         — ${authFails.map(s => `<a href="#/service/${s.service}">${escapeHtml(s.label)}</a>`).join(', ')}.
         Books touching ${authFails.length > 1 ? 'these' : 'this'} will keep failing until it is fixed.</span>
-        <span class="grow"></span>
-        <button class="primary" onclick="go('/services')">Fix credentials</button>
-      </div>`;
+        ${action}
+      </div>`);
     return;
   }
   if (down.length) {
-    host.innerHTML = `
+    setHtml(host, `
       <div class="banner warn">
-        <span class="dot warn"></span>
-        <span><b>${down.length} service${down.length > 1 ? 's' : ''} unreachable</b>
+        <span class="txt"><span class="dot warn" aria-hidden="true"></span>
+        <b>${down.length} service${down.length > 1 ? 's' : ''} unreachable</b>
         — ${down.map(s => `<a href="#/service/${s.service}">${escapeHtml(s.label)}</a>`).join(', ')}.
         Retries are automatic.</span>
-        <span class="grow"></span>
-        <button onclick="go('/services')">Details</button>
-      </div>`;
+        ${r.name !== 'services' ? `<button onclick="go('/services')">Details</button>` : ''}
+      </div>`);
     return;
   }
   const g = state?.goodreads || {};
   if (g.has_session === false) {
-    host.innerHTML = `
+    setHtml(host, `
       <div class="banner warn">
-        <span class="dot warn"></span>
-        <span><b>No Goodreads session.</b> Books cannot be discovered and nothing can be shelved until you sign in.</span>
-        <span class="grow"></span>
+        <span class="txt"><span class="dot warn" aria-hidden="true"></span>
+        <b>No Goodreads session.</b> Books cannot be discovered and nothing can be shelved until you sign in.</span>
         <button class="primary" onclick="window.location='/goodreads'">Sign in to Goodreads</button>
-      </div>`;
+      </div>`);
     return;
   }
-  host.innerHTML = '';
+  setHtml(host, '');
 }
 
 /* The right rail. Service health north-star: on every page, without a click,
@@ -358,11 +497,17 @@ function renderRail() {
     // The open service is marked with a class, not the inline background it
     // used to carry: a style attribute outranks .svc-row:hover, so the current
     // row was the one row in the list that gave no hover feedback.
+    // The dot is the whole status for a sighted reader; the word in front of
+    // the name is the same thing for a screen reader.
+    const word = checking ? 'testing'
+      : s.ok === true ? 'healthy'
+      : s.ok === false ? (KIND_LABEL[s.failure_kind] || 'down')
+      : 'never checked';
     return `<a class="svc-row ${checking ? 'testing' : s.ok === false ? 'bad' : ''} ${s.service === current ? 'current' : ''}"
                href="#/service/${s.service}" title="${escapeHtml(s.label)} — ${escapeHtml(when)}"
-               ${s.service === current ? 'aria-current="true"' : ''}>
-      <span class="dot ${cls}"></span>
-      <span class="name">${escapeHtml(s.label)}</span>
+               ${s.service === current ? 'aria-current="page"' : ''}>
+      <span class="dot ${cls}" aria-hidden="true"></span>
+      <span class="name"><span class="sr-only">${escapeHtml(word)}: </span>${escapeHtml(s.label)}</span>
       <span class="note">${note}</span>
     </a>`;
   }).join('');
@@ -370,12 +515,17 @@ function renderRail() {
   const g = state?.goodreads || {};
   const grSocket = `<a class="svc-row ${g.has_session ? '' : 'bad'}" href="/goodreads"
       title="Goodreads session">
-      <span class="dot ${g.has_session ? 'ok' : 'warn'}"></span>
-      <span class="name">Goodreads</span>
+      <span class="dot ${g.has_session ? 'ok' : 'warn'}" aria-hidden="true"></span>
+      <span class="name"><span class="sr-only">${g.has_session ? 'signed in' : 'not signed in'}: </span>Goodreads</span>
       <span class="note">${g.has_session ? escapeHtml(g.session_age || '') : 'not signed in'}</span>
     </a>`;
 
-  host.innerHTML = `
+  const ver = state?.version || versionHistory?.current || '';
+  let seen = null;
+  try { seen = localStorage.getItem('gr.seenVersion'); } catch {}
+  const unread = !!ver && seen !== ver;
+
+  setHtml(host, `
     <div class="rail-card">
       <h3><span class="grow">Service status</span>
         <button class="tiny ghost" onclick="recheckServices(this)"
@@ -406,7 +556,15 @@ function renderRail() {
           What's new<span class="new-dot"></span>
         </a>
       </div>
-    </div>`;
+    </div>
+
+    <div class="rail-foot">
+      <a class="sidebar-version${unread ? ' unread' : ''}" href="#/version"
+         title="${unread ? 'New in this version' : 'Version history'}">
+        ${ver ? `<span class="vnum">v${escapeHtml(ver)}</span>` : ''}What's new${
+          unread ? '<span class="new-dot" aria-hidden="true"></span><span class="sr-only"> (new)</span>' : ''}
+      </a>
+    </div>`);
 }
 
 /* ----------------------------------------------------------- dashboard */
@@ -417,7 +575,7 @@ function viewDashboard() {
   const tiles = [
     ['books', t.books, 'Books tracked', ''],
     ['done', t.complete, 'Completed', 'ok'],
-    ['working', t.in_flight, 'In progress', 'gold'],
+    ['working', t.in_flight, 'In progress', 'info'],
     ['failed', t.failed, 'Need attention', t.failed ? 'err' : ''],
     ['partial', t.partial, 'Audiobook missing', ''],
     ['unavailable', t.unavailable, 'Not found', ''],
@@ -429,15 +587,14 @@ function viewDashboard() {
     <div class="tiles">
       ${tiles.map(([key, n, label, cls]) => `
         <button class="tile ${cls} clickable" onclick="tileGo('${key}')">
-          <div class="n">${n ?? 0}</div>
-          <div class="k">${label}</div>
+          <span class="n">${n ?? 0}</span>
+          <span class="k">${label}</span>
         </button>`).join('')}
     </div>
 
     ${autoOff ? `<div class="banner warn">
-      <span class="dot warn"></span>
-      <span><b>Auto-shelve is off.</b> Finished books are not being moved to a collected shelf.</span>
-      <span class="grow"></span>
+      <span class="txt"><span class="dot warn" aria-hidden="true"></span>
+      <b>Auto-shelve is off.</b> Finished books are not being moved to a collected shelf.</span>
       <button onclick="setAutoShelve(true)">Turn on</button>
     </div>` : ''}
 
@@ -454,7 +611,7 @@ function viewDashboard() {
       <h2><span class="grow">Recent activity</span>
         <button class="tiny ghost" onclick="go('/activity')">Full log</button>
       </h2>
-      <div class="body flush log">${renderEvents((state?.events || []).slice(0, 14))}</div>
+      <div class="body flush log capped">${renderEvents((state?.events || []).slice(0, 14))}</div>
     </div>`;
 }
 
@@ -470,7 +627,7 @@ function renderLiveDownloads() {
 
   return `<div class="panel">
     <h2><span class="grow">Downloading now</span>
-      <span class="faint small">${rows.length} in flight</span></h2>
+      <span class="count">${rows.length} in flight</span></h2>
     <div class="body">
       ${rows.map(({ book }) => `
         <div style="padding:8px 0;border-bottom:1px solid var(--line-soft)">
@@ -493,12 +650,12 @@ function tileGo(key) {
 }
 
 function renderIssuePreview() {
-  if (!issues) return '<div class="muted">Loading…</div>';
+  if (!issues) return stateBlock('loading', 'Loading…');
   const actionable = (issues.groups || []).filter(g => g.actionable);
   const review = issues.counts.needs_review || 0;
 
   if (!actionable.length && !review) {
-    return '<div class="muted">Nothing needs attention. Every book is either progressing or done.</div>';
+    return stateBlock('empty', 'Nothing needs attention. Every book is either progressing or done.');
   }
 
   const rows = actionable.slice(0, 5).map(g => `
@@ -562,10 +719,12 @@ function booksMatching(filter, term = searchTerm) {
 
   if (term) {
     const q = term.toLowerCase();
+    // Genres are searchable because the book page links them into this filter.
     out = out.filter(b =>
       (b.title || '').toLowerCase().includes(q) ||
       (b.author || '').toLowerCase().includes(q) ||
-      (b.category || '').toLowerCase().includes(q));
+      (b.category || '').toLowerCase().includes(q) ||
+      (b.genres || []).some(g => String(g).toLowerCase().includes(q)));
   }
   return out;
 }
@@ -594,6 +753,8 @@ function viewBooks() {
   };
 
   return `
+    ${pageHead('My Books', `Showing ${list.length} of ${(state.books || []).length} books`)}
+
     <div class="toolbar">
       <div class="filters">
         ${Object.keys(labels).map(f => `
@@ -606,39 +767,50 @@ function viewBooks() {
         <button class="tiny ghost" onclick="onHeaderSearch('')">clear</button></span>` : ''}
     </div>
 
+    ${notes[currentFilter] ? `<div class="callout">${notes[currentFilter]}</div>` : ''}
+
     <div class="panel">
-      ${notes[currentFilter] ? `<div class="body tight small muted">${notes[currentFilter]}</div>` : ''}
       ${list.length
         ? `<div class="book-list">${list.map(bookRow).join('')}</div>`
-        : `<div class="empty">Nothing here.${
-            currentFilter === 'attention' ? ' No book is currently failing.' : ''}</div>`}
+        : stateBlock('empty', 'Nothing here.' +
+            (currentFilter === 'attention' ? ' No book is currently failing.' : ''))}
     </div>`;
 }
 
 function bookRow(book) {
   const st = bookState(book);
-  const chips = (state.stages || []).map(stage => {
+  const stages = state.stages || [];
+  let okCount = 0;
+  // Eight named chips per row buried the title. The dots say the same thing in
+  // a tenth of the width; the caption and the aria-label carry what they lose.
+  const dots = stages.map(stage => {
     const run = (book.stages || {})[stage] || { status: 'pending' };
     const isAuth = run.status === 'failed' && run.failure_kind === 'auth';
     const isNoData = run.status === 'failed' && run.failure_kind === 'data';
-    const cls = isAuth ? 'auth' : (isNoData ? 'nodata' : run.status);
-    return `<span class="chip ${cls}" title="${escapeHtml(run.detail || '')}">
-      ${escapeHtml(STAGE_LABEL[stage] || stage)}</span>`;
+    const cls = isAuth ? 'auth' : isNoData ? 'nodata' : run.status;
+    if (run.status === 'ok') okCount++;
+    const tip = `${STAGE_LABEL[stage] || stage} — ${isAuth ? 'credentials' : run.status}` +
+      (run.detail ? ': ' + String(run.detail).slice(0, 90) : '');
+    return `<span class="stage-dot ${cls}" title="${escapeHtml(tip)}"></span>`;
   }).join('');
+  const dotLabel = stages
+    .map(s => `${STAGE_LABEL[s] || s} ${((book.stages || {})[s] || { status: 'pending' }).status}`)
+    .join(', ');
 
   // The most useful single line: what is blocking this book, and who to blame.
-  const blocker = (state.stages || [])
+  const blocker = stages
     .map(s => ({ s, r: (book.stages || {})[s] || {} }))
     .find(x => x.r.status === 'failed' || x.r.status === 'blocked');
   const live = progressBlock(book);
 
-  let where;
+  let where = '';
   if (live) {
     where = live;
   } else if (blocker && blocker.r.status === 'failed') {
     const svc = serviceOfRun(blocker.r);
+    const isAuth = blocker.r.failure_kind === 'auth';
     where = `<div class="blocker">
-        <span class="chip failed">${escapeHtml(STAGE_LABEL[blocker.s])}</span>
+        <span class="chip ${isAuth ? 'auth' : 'failed'}">${escapeHtml(STAGE_LABEL[blocker.s])}${isAuth ? ' · credentials' : ''}</span>
         ${svc ? serviceChip(svc) : ''}
         <div class="msg">${escapeHtml((blocker.r.detail || '').slice(0, 110))}</div>
       </div>`;
@@ -649,32 +821,30 @@ function bookRow(book) {
         ${svc ? serviceChip(svc) : ''}
         <div class="msg soft">${escapeHtml((blocker.r.detail || '').slice(0, 110))}</div>
       </div>`;
-  } else {
-    where = `<div class="blocker"><span class="msg quiet">${st === 'done' ? 'complete' : 'working'}</span></div>`;
   }
 
   // The title is a real link as well as the row being clickable: a link is
   // keyboard-usable and can be middle-clicked.
   const cover = book.cover_url
     ? `<img class="cover" src="${escapeHtml(book.cover_url)}" alt="" loading="lazy"
-             onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover blank',textContent:'\u{1F4D5}'}))">`
-    : `<div class="cover blank">&#128213;</div>`;
+             onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover blank',ariaHidden:'true'}))">`
+    : `<div class="cover blank" aria-hidden="true"></div>`;
 
   return `<div class="book-row" onclick="go('/book/${book.id}')">
     ${cover}
     <div>
       <a class="title" href="#/book/${book.id}" onclick="event.stopPropagation()">${escapeHtml(book.title)}</a>
-      <div class="byline">${escapeHtml(book.author || 'unknown author')}${book.year ? ' · ' + book.year : ''}</div>
-      <div class="meta">
-        <span class="chip">${escapeHtml(book.category || 'uncategorised')}</span>
-        ${book.genre_source ? `<span class="faint"> via ${escapeHtml(book.genre_source)}</span>` : ''}
-        ${book.needs_review ? '<span style="color:var(--warn)"> · no genre rule matched</span>' : ''}
-      </div>
+      <div class="byline">by <span class="author">${escapeHtml(book.author || 'unknown author')}</span>
+        <span class="shelved">(filed as <i>${escapeHtml(book.category || 'uncategorised')}</i>${
+          book.genre_source ? ' via ' + escapeHtml(book.genre_source) : ''})</span></div>
+      ${book.year || book.needs_review ? `<div class="meta">${book.year ? 'published ' + escapeHtml(book.year) : ''}${
+        book.needs_review ? (book.year ? ' — ' : '') + '<span class="warn">no genre rule matched</span>' : ''}</div>` : ''}
       ${where}
     </div>
     <div class="side">
       <span class="chip ${st === 'failed' ? 'failed' : st}">${st}</span>
-      <div class="pipeline">${chips}</div>
+      <div class="pipeline" role="img" aria-label="${escapeHtml(dotLabel)}">${dots}</div>
+      <div class="pipeline-cap">${okCount} of ${stages.length} stages</div>
     </div>
   </div>`;
 }
@@ -1147,11 +1317,15 @@ function onHeaderSearch(value) {
 async function viewBook(id) {
   let detail;
   try { detail = await api(`/api/books/${id}`); }
-  catch (err) { return `<div class="panel"><div class="body">Could not load book: ${escapeHtml(err.message)}</div></div>`; }
+  catch (err) {
+    return pageHead('Book') + stateBlock('error', 'Could not load book: ' + err.message,
+      '<button class="tiny" onclick="refresh()">Retry</button>');
+  }
 
   const book = detail.book;
   const placed = detail.placed || {};
   const events = detail.events || [];
+  viewTitle = `${book.title} by ${book.author || 'unknown author'}`;
 
   const rows = (state.stages || []).map(stage => {
     const run = (book.stages || {})[stage] || { status: 'pending' };
@@ -1163,10 +1337,13 @@ async function viewBook(id) {
           && canonicalService(g.service) === svc
           && (g.sample === run.detail || g.detail === run.detail)) || {}).fix
       : '';
+    // A stage that is not failing does not need a Retry button competing with
+    // the one under the cover; it still gets a quiet way to run again.
+    const canRetry = run.status === 'failed' || run.status === 'blocked';
     return `<div class="stage-row">
       <div>
-        <div class="stage-name">${escapeHtml(STAGE_LABEL[stage] || stage)}</div>
-        ${run.attempts ? `<div class="stage-attempts">${run.attempts} attempt${run.attempts > 1 ? 's' : ''}</div>` : ''}
+        <div class="stage-name">${escapeHtml(STAGE_LABEL[stage] || stage)}${
+          run.attempts ? ` <span class="stage-attempts">· ${run.attempts} attempt${run.attempts > 1 ? 's' : ''}</span>` : ''}</div>
       </div>
       <div class="row tight">
         <span class="chip ${cls}">${escapeHtml(isAuth ? 'credentials' : run.status)}</span>
@@ -1174,7 +1351,9 @@ async function viewBook(id) {
       </div>
       <div class="stage-detail">${escapeHtml(run.detail || '—')}
         ${fix ? `<span class="why">${escapeHtml(fix)}</span>` : ''}</div>
-      <div><button class="tiny" onclick="retryStage(${book.id},'${stage}',this)">Retry</button></div>
+      <div>${canRetry
+        ? `<button class="tiny" onclick="retryStage(${book.id},'${stage}',this)">Retry</button>`
+        : `<button class="link stage-rerun" onclick="retryStage(${book.id},'${stage}',this)">re-run</button>`}</div>
     </div>`;
   }).join('');
 
@@ -1191,45 +1370,58 @@ async function viewBook(id) {
 
   const cover = book.cover_url
     ? `<img class="cover-lg" src="${escapeHtml(book.cover_url)}" alt=""
-             onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover-lg blank',textContent:'\u{1F4D5}'}))">`
-    : `<div class="cover-lg blank">&#128213;</div>`;
+             onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cover-lg blank',ariaHidden:'true'}))">`
+    : `<div class="cover-lg blank" aria-hidden="true"></div>`;
+
+  const FILTER_LABEL = {
+    attention: 'Needs attention', partial: 'Audiobook missing', unavailable: 'Not found',
+    working: 'In progress', done: 'Completed', review: 'Genre review', all: 'All',
+  };
+  const STATE_LABEL = {
+    done: 'Complete', working: 'In progress', partial: 'Audiobook missing',
+    unavailable: 'Not found', failed: 'Failing',
+  };
+  const genres = book.genres || [];
 
   return `
-    <div class="row" style="margin-bottom:12px">
-      <button class="ghost" onclick="go('/books')">&larr; My Books</button>
-      <span class="grow"></span>
-      <span class="chip ${st === 'failed' ? 'failed' : st}">${st}</span>
-    </div>
+    <div class="crumbs"><a href="#/books">My Books</a><span>&gt;</span>${escapeHtml(FILTER_LABEL[currentFilter] || 'All')}</div>
 
-    <div class="panel">
-      <div class="body">
-        <div class="bookpage">
-          <div>${cover}</div>
-          <div>
-            <h1>${escapeHtml(book.title)}</h1>
-            <div class="byline">${escapeHtml(book.author || 'unknown author')}${book.year ? ' · ' + book.year : ''}</div>
-            ${book.goodreads_url ? `<div class="small" style="margin-top:6px">
-              <a href="${escapeHtml(book.goodreads_url)}" target="_blank" rel="noopener">View on Goodreads</a></div>` : ''}
-            <dl class="kv mt">
-              <dt>Category</dt>
-              <dd><select onchange="setCategory(${book.id}, this.value)">${cats}</select></dd>
-              <dt>Genres</dt>
-              <dd>${(book.genres || []).slice(0, 8).map(escapeHtml).join(', ') || '—'}
-                <span class="faint small">(${escapeHtml(book.genre_source || 'unresolved')})</span></dd>
-              <dt>Auto-shelve</dt>
-              <dd><label class="row tight"><input type="checkbox" style="width:auto"
-                    ${book.auto_shelve ? 'checked' : ''}
-                    onchange="setBookAutoShelve(${book.id}, this.checked)"> move when finished</label></dd>
-            </dl>
-          </div>
+    <div class="bookpage">
+      <div class="cover-col">${cover}
+        <div class="cover-actions">
+          ${st === 'failed'
+            ? `<button class="gr-btn primary" onclick="retryBook(${book.id},this)">Retry failed stages</button>`
+            : `<div class="gr-btn state">${STATE_LABEL[st] || st}</div>`}
+          ${book.goodreads_url ? `<a class="gr-btn outline" href="${escapeHtml(book.goodreads_url)}"
+             target="_blank" rel="noopener">View on Goodreads</a>` : ''}
         </div>
+      </div>
+      <div>
+        <h1 tabindex="-1">${escapeHtml(book.title)}</h1>
+        <div class="byline"><a href="#/books" data-search="${escapeHtml(book.author || '')}">${
+          escapeHtml(book.author || 'unknown author')}</a>${
+          book.year ? ` <span class="faint small">· ${escapeHtml(book.year)}</span>` : ''}</div>
+        <dl class="kv">
+          <dt>Category</dt>
+          <dd><span class="row tight">
+            <select id="cat-select">${cats}</select>
+            <button class="tiny" onclick="setCategory(${book.id}, document.getElementById('cat-select').value)">Apply</button>
+          </span></dd>
+          <dt title="from ${escapeHtml(book.genre_source || 'unresolved')}">Genres</dt>
+          <dd class="genres">${genres.length
+            ? genres.slice(0, 7).map(g => `<a class="genre" href="#/books" data-search="${escapeHtml(g)}">${escapeHtml(g)}</a>`).join('') +
+              (genres.length > 7 ? '<span class="genre more">…more</span>' : '')
+            : '—'}</dd>
+          <dt>Auto-shelve</dt>
+          <dd><label class="row tight"><input type="checkbox" style="width:auto"
+                ${book.auto_shelve ? 'checked' : ''}
+                onchange="setBookAutoShelve(${book.id}, this.checked)"> move when finished</label></dd>
+        </dl>
       </div>
     </div>
 
     <div class="panel">
-      <h2><span class="grow">Pipeline</span>
-        <button class="tiny" onclick="retryBook(${book.id},this)">Retry failed stages</button>
-      </h2>
+      <h2><span class="grow">Pipeline</span></h2>
       <div class="stages">${rows}</div>
     </div>
 
@@ -1251,6 +1443,35 @@ function statusChip(s) {
   return '<span class="chip pending">unknown</span>';
 }
 
+/* One credential field. Shared by the all-services page and a single service's
+ * own page, so the two can never drift apart. */
+function credField(f) {
+  return `
+    <label class="field">
+      <span class="lbl">${escapeHtml(f.label)}
+        ${f.is_set ? '<span class="chip ok" style="margin-left:6px">set</span>'
+                   : '<span class="chip" style="margin-left:6px">not set</span>'}</span>
+      <input type="password" data-key="${f.key}" data-label="${escapeHtml(f.label)}"
+             placeholder="${f.is_set ? '•••••• unchanged' : 'paste value'}">
+      ${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}
+    </label>`;
+}
+
+/* A service's fields under its own heading, with that service's health beside
+ * it: a rejected key and the field that fixes it belong on the same line. */
+function credGroup(svcKey, name, fields) {
+  const s = svcKey ? (state?.health?.services || []).find(x => x.service === svcKey) : null;
+  const cls = !s ? 'idle' : s.ok === true ? 'ok' : s.ok === false ? (s.failure_kind === 'auth' ? 'err' : 'warn') : 'idle';
+  const set = fields.filter(f => f.is_set).length;
+  return `<div class="cred-group">
+    <div class="cg-head">
+      <span class="dot ${cls}" aria-hidden="true"></span>
+      <span class="cg-name">${escapeHtml(name)}</span>
+      <span class="cg-count">${set} of ${fields.length} set</span>
+      ${svcKey ? `<a class="cg-open" href="#/service/${svcKey}">Open</a>` : ''}
+    </div>${fields.map(credField).join('')}</div>`;
+}
+
 function viewServices() {
   const health = state?.health || { services: [] };
   // The same in-flight state the rail renders, from the same counter — the two
@@ -1261,9 +1482,11 @@ function viewServices() {
     const cls = checking ? 'testing'
       : s.ok === true ? 'ok'
       : s.ok === false ? (s.failure_kind === 'auth' ? 'err' : 'warn') : 'idle';
-    return `<div class="svc ${checking ? 'testing' : s.ok === false ? 'down' : ''}" onclick="go('/service/${s.service}')">
+    const since = s.ok_since ? relTime(s.ok_since) : '';
+    return `<a class="svc ${checking ? 'testing' : s.ok === false ? 'down' : ''}" href="#/service/${s.service}">
+
       <div class="svc-head">
-        <span class="dot ${cls}"></span>
+        <span class="dot ${cls}" aria-hidden="true"></span>
         <span class="name">${escapeHtml(s.label)}</span>
         <span class="grow"></span>
         ${checking ? '<span class="chip testing">testing…</span>' : statusChip(s)}
@@ -1272,26 +1495,36 @@ function viewServices() {
       ${!checking && s.ok === false ? `<div class="impact">${escapeHtml(s.impact)}</div>` : ''}
       <div class="faint small" style="margin-top:6px">
         ${s.checked ? `checked ${escapeHtml(relTime(s.checked_at))}` : 'never checked'}
-        ${!checking && s.ok_since ? ` · healthy since ${escapeHtml(relTime(s.ok_since))}` : ''}
+        ${!checking && since ? ` · ${since === 'just now' ? 'healthy since just now'
+                     : 'healthy for ' + escapeHtml(since.replace(/ ago$/, ''))}` : ''}
       </div>
-    </div>`;
+    </a>`;
   }).join('');
 
-  const fields = settingsFields
-    ? (settingsFields.fields || []).map(f => `
-        <label class="field">
-          <span class="lbl">${escapeHtml(f.label)}
-            ${f.is_set ? '<span class="chip ok" style="margin-left:6px">set</span>'
-                       : '<span class="chip" style="margin-left:6px">not set</span>'}</span>
-          <input type="password" data-key="${f.key}" data-label="${escapeHtml(f.label)}"
-                 placeholder="${f.is_set ? '•••••• unchanged' : 'paste value'}">
-          ${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}
-        </label>`).join('')
-    : '<div class="muted">Loading credentials…</div>';
+  let fields;
+  if (settingsFields) {
+    const all = settingsFields.fields || [];
+    const used = new Set();
+    const left = [], right = [];
+    CRED_GROUPS.forEach(([p, k, n]) => {
+      const fs = all.filter(f => f.key.startsWith(p));
+      if (!fs.length) return;
+      fs.forEach(f => used.add(f.key));
+      (CRED_LEFT.has(p) ? left : right).push(credGroup(k, n, fs));
+    });
+    const other = all.filter(f => !used.has(f.key));
+    if (other.length) right.push(credGroup('', 'Other', other));
+    fields = `<div class="cred-grid"><div class="cred-col">${left.join('')}</div><div class="cred-col">${right.join('')}</div></div>`;
+  } else {
+    fields = stateBlock('loading', 'Loading credentials…');
+  }
 
   const g = state?.goodreads || {};
 
   return `
+    ${pageHead('Services', `${health.services.filter(s => s.ok === true).length} of ${health.services.length} healthy${
+      g.has_session === false ? ' · Goodreads not signed in' : ''}`)}
+
     <div class="panel">
       <h2><span class="grow">Services</span>
         <button class="tiny" onclick="recheckServices(this)"
@@ -1315,8 +1548,8 @@ function viewServices() {
         <dl class="kv">
           <dt>Session</dt>
           <dd>${g.has_session
-            ? `<b style="color:var(--ok)">${escapeHtml(g.session_age || 'stored')}</b>`
-            : '<b style="color:var(--warn)">not signed in</b>'}</dd>
+            ? `<span class="dot ok" aria-hidden="true"></span>${escapeHtml(g.session_age || 'stored')}`
+            : '<span class="dot warn" aria-hidden="true"></span>not signed in'}</dd>
           <dt>User id</dt><dd class="mono">${escapeHtml(g.user_id || 'not detected')}</dd>
         </dl>
       </div>
@@ -1344,28 +1577,20 @@ async function viewService(name) {
   if (!d || d.service !== key) {
     try { d = await api(`/api/services/${encodeURIComponent(key)}`); serviceDetail = d; }
     catch (err) {
-      return `<div class="panel"><div class="body">
-        Could not load ${escapeHtml(key)}: ${escapeHtml(err.message)}</div></div>`;
+      return pageHead(key) + stateBlock('error', `Could not load ${key}: ${err.message}`,
+        '<button class="tiny" onclick="refresh()">Retry</button>');
     }
   }
+  viewTitle = d.label;
 
   const h = d.health;
-  const cls = !h ? 'idle' : h.ok === true ? 'ok' : (h.failure_kind === 'auth' ? 'err' : 'warn');
 
   const creds = d.fields.length
     ? `<div class="panel">
         <h2><span class="grow">Credentials</span>
           <button class="tiny primary" onclick="saveSettings(this)">Save</button></h2>
         <div class="body"><div id="settings-body">
-          ${d.fields.map(f => `
-            <label class="field">
-              <span class="lbl">${escapeHtml(f.label)}
-                ${f.is_set ? '<span class="chip ok" style="margin-left:6px">set</span>'
-                           : '<span class="chip" style="margin-left:6px">not set</span>'}</span>
-              <input type="password" data-key="${f.key}" data-label="${escapeHtml(f.label)}"
-                     placeholder="${f.is_set ? '•••••• unchanged' : 'paste value'}">
-              ${f.hint ? `<span class="hint">${escapeHtml(f.hint)}</span>` : ''}
-            </label>`).join('')}
+          ${d.fields.map(credField).join('')}
           <div id="settings-note"></div>
         </div></div>
       </div>`
@@ -1379,66 +1604,62 @@ async function viewService(name) {
   const held = d.held.length
     ? `<div class="panel">
         <h2><span class="grow">Waiting on ${escapeHtml(d.label)}</span>
-          <span class="faint small">${d.held.length}${
+          <span class="count">${d.held.length}${
             d.held.length > HELD_CAP ? ` · showing ${HELD_CAP}` : ''}</span></h2>
         <div class="body flush">
           ${shown.map(x => `
             <div class="held-row">
               <span class="chip ${x.status === 'failed' ? 'failed' : 'blocked'}">${escapeHtml(STAGE_LABEL[x.stage] || x.stage)}</span>
               <a href="#/book/${x.id}">${escapeHtml(x.title)}</a>
-              <span class="faint small">${escapeHtml((x.detail || '').slice(0, 130))}</span>
+              <span class="small ${x.status === 'failed' ? 'reason-err' : 'faint'}">${escapeHtml((x.detail || '').slice(0, 130))}</span>
             </div>`).join('')}
           ${d.held.length > HELD_CAP ? `<div class="held-row muted small">
             … and ${d.held.length - HELD_CAP} more on this service.</div>` : ''}
         </div>
       </div>`
-    : `<div class="panel"><div class="body muted">
-        Nothing is waiting on ${escapeHtml(d.label)} right now.</div></div>`;
+    : `<div class="panel">${stateBlock('empty', `Nothing is waiting on ${d.label} right now.`)}</div>`;
 
   const stages = d.stages.length
     ? d.stages.map(s => escapeHtml(STAGE_LABEL[s] || s)).join(', ')
     : 'none';
 
+  // "is not answering" was printed over an expired API key too. The lead names
+  // the kind of failure, so the sentence matches the fix underneath it.
+  let failure = '';
+  if (h && h.ok === false) {
+    const lead = h.failure_kind === 'auth' ? `${d.label} is rejecting its credentials — fix the key below.`
+      : h.failure_kind === 'network' ? `${d.label} is not answering.`
+      : h.failure_kind === 'server' ? `${d.label} is returning errors.`
+      : `${d.label} is unhealthy.`;
+    const impact = h.impact ? ' ' + h.impact.charAt(0).toUpperCase() + h.impact.slice(1) + '.' : '';
+    failure = `<div class="banner err" style="margin:14px 0 0">
+      <span class="txt"><span class="dot err" aria-hidden="true"></span>${escapeHtml(lead + impact)}</span>
+    </div>`;
+  }
+
   return `
-    <div class="row" style="margin-bottom:12px">
-      <button class="ghost" onclick="go('/services')">&larr; Services</button>
-      <span class="grow"></span>
-      ${h ? statusChip(h) : '<span class="chip pending">not probed</span>'}
-    </div>
+    ${pageHead(d.label,
+      `${h ? escapeHtml(h.detail || '') : 'never checked'}${
+        h && h.checked ? ` · checked ${escapeHtml(relTime(h.checked_at))}` : ''}${
+        h && h.ok_since ? ` · healthy since ${escapeHtml(relTime(h.ok_since))}` : ''}`,
+      `<a href="#/services">Services</a><span>&gt;</span>${escapeHtml(d.label)}`,
+      `${h ? statusChip(h) : '<span class="chip pending">not probed</span>'}<span class="grow"></span>` +
+      `${d.breaker && d.breaker.state !== 'closed' ? `<button class="tiny" onclick="clearBreaker('${d.service}', this)">Clear hold</button>` : ''}` +
+      `${d.service !== 'settings' ? `<button class="primary" onclick="testService('${d.service}', this)">Test now</button>` : ''}` +
+      `${d.login_url ? `<button onclick="window.location='${d.login_url}'">Sign in</button>` : ''}`)}
 
     <div class="panel">
       <div class="body">
-        <div class="row" style="align-items:flex-start">
-          <span class="dot ${cls}" style="margin-top:7px"></span>
-          <div>
-            <h1 style="font-family:var(--serif);font-size:23px;margin:0;color:var(--brown)">${escapeHtml(d.label)}</h1>
-            <div class="small muted" style="margin-top:3px">
-              ${h ? escapeHtml(h.detail || '') : 'never checked'}
-              ${h && h.checked ? ` · checked ${escapeHtml(relTime(h.checked_at))}` : ''}
-              ${h && h.ok_since ? ` · healthy since ${escapeHtml(relTime(h.ok_since))}` : ''}
-            </div>
-          </div>
-          <span class="grow"></span>
-          ${d.breaker && d.breaker.state !== 'closed' ? `
-            <button class="tiny" onclick="clearBreaker('${d.service}', this)">Clear hold</button>` : ''}
-          ${d.service !== 'settings' ? `
-            <button class="primary" onclick="testService('${d.service}', this)">Test now</button>` : ''}
-          ${d.login_url ? `<button onclick="window.location='${d.login_url}'">Sign in</button>` : ''}
-        </div>
-
-        <dl class="kv mt">
+        <dl class="kv">
           <dt>Endpoint</dt>
           <dd class="mono">${escapeHtml(d.url || '—')}</dd>
-          <dt>Cannot do</dt>
+          <dt>When down</dt>
           <dd>${h && h.impact ? escapeHtml(h.impact) : '—'}</dd>
-          <dt>Used by</dt>
+          <dt>Stages</dt>
           <dd>${stages}</dd>
         </dl>
 
-        ${h && h.ok === false ? `<div class="banner err" style="margin:14px 0 0">
-          <span class="dot err"></span>
-          <span>${escapeHtml(d.label)} is not answering. ${escapeHtml(h.impact || '')}.</span>
-        </div>` : ''}
+        ${failure}
       </div>
     </div>
 
@@ -1447,31 +1668,80 @@ async function viewService(name) {
 
     <div class="panel">
       <h2><span class="grow">Log for ${escapeHtml(d.label)}</span>
-        <span class="faint small">${d.events.length} recent${
+        <span class="count">${d.events.length} recent${
           d.events_inferred ? ' · matched by name' : ''}</span></h2>
       ${d.events_inferred ? `<div class="body tight small muted">
         These were recovered by matching “${escapeHtml(d.label)}” in older log lines.
         New lines are recorded against the service directly.</div>` : ''}
-      <div class="body flush log">${renderEvents(d.events)}</div>
+      <div class="body flush log no-svc">${renderEvents(d.events, { hideService: true })}</div>
     </div>`;
 }
 
-function renderEvents(events) {
-  if (!events || !events.length) return '<div class="muted" style="padding:12px 15px">Nothing yet.</div>';
-  return events.map(e => `<div class="ev ${escapeHtml(e.level || '')}">
-    <span class="t">${escapeHtml(stamp(e.ts))}</span>
-    <span>${e.service ? serviceChip(e.service) : ''}</span>
-    <span class="msg">${escapeHtml(e.message || '')}</span>
-  </div>`).join('');
+function renderEvents(events, { hideService = false } = {}) {
+  if (!events || !events.length) return stateBlock('empty', 'No activity recorded yet.');
+  return events.map(e => {
+    const level = escapeHtml(e.level || '');
+    // Colour is the only thing marking a warning or an error; the prefix is
+    // the same information for anyone who cannot see it.
+    const lvl = (level === 'warning' || level === 'error') ? `<span class="sr-only">${level}: </span>` : '';
+    return `<div class="ev ${level}"><span class="t">${escapeHtml(stamp(e.ts))}</span>` +
+      (hideService ? '' : `<span>${e.service ? serviceChip(e.service) : ''}</span>`) +
+      `<span class="msg">${lvl}${escapeHtml(e.message || '')}</span></div>`;
+  }).join('');
 }
 
 /* ------------------------------------------------------------ activity */
 function viewActivity() {
   const events = state?.events || [];
-  return `<div class="panel">
-    <h2><span class="grow">Activity</span><span class="faint small">${events.length} recent</span></h2>
-    <div class="body flush log">${renderEvents(events)}</div>
-  </div>`;
+  return `
+    ${pageHead('Activity', `${events.length} recent events`)}
+    <div class="panel">
+      <div class="body flush log">${renderEvents(events)}</div>
+    </div>`;
+}
+
+/* ------------------------------------------------------------- version */
+async function viewVersion() {
+  let d = versionHistory;
+  if (!d) {
+    try { d = await api('/api/version/history'); versionHistory = d; }
+    catch (err) {
+      return pageHead('Version history') + stateBlock('error', 'Could not load version history: ' + err.message,
+        '<button class="tiny" onclick="refresh()">Retry</button>');
+    }
+  }
+  // Reading the page is what marks the release as seen; the rail pill clears
+  // on the next render.
+  try { localStorage.setItem('gr.seenVersion', d.current); } catch {}
+
+  // On a phone an open area pushes the next release off the screen entirely.
+  const narrow = matchMedia('(max-width: 780px)').matches;
+  const releases = d.releases || [];
+
+  const entries = releases.map((rel, idx) => {
+    const isCurrent = majorMinor(rel.version) === majorMinor(d.current);
+    const open = idx === 0 && !narrow;
+    return `<section class="version-entry" id="rel-${escapeHtml(String(rel.version).replace(/\./g, '-'))}">
+      <div class="vhead">
+        <h2 class="vnum">v${escapeHtml(isCurrent ? d.current : rel.version)}</h2>
+        <time class="vdate" datetime="${escapeHtml(rel.date || '')}">${escapeHtml(fmtDate(rel.date))}</time>
+        ${isCurrent ? '<span class="vtag">current</span>' : ''}
+      </div>
+      ${rel.summary ? `<p class="vsummary">${escapeHtml(rel.summary)}</p>` : ''}
+      ${(rel.sections || []).map(sec => {
+        const items = sec.items || [];
+        return `<details class="varea"${open ? ' open' : ''}>
+          <summary><h3>${escapeHtml(sec.heading)}</h3>
+            <span class="vcount">${items.length} change${items.length === 1 ? '' : 's'}</span></summary>
+          <ul class="vchanges">${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
+        </details>`;
+      }).join('')}
+    </section>`;
+  }).join('');
+
+  return `<div class="version-page">${
+    pageHead('Version history', `Running v${escapeHtml(d.current || '?')} · ${releases.length} release${releases.length === 1 ? '' : 's'}`)
+  }<div class="version-list">${entries || stateBlock('empty', 'No releases recorded.')}</div></div>`;
 }
 
 /* ------------------------------------------------------------- version */
@@ -1728,10 +1998,21 @@ let renderToken = 0;
 async function render() {
   const token = ++renderToken;
   const r = route();
+  const view = $('#view');
+  viewTitle = '';
 
   if (!state) {
-    $('#view').innerHTML = '<div class="empty">Loading…</div>';
+    setHtml(view, stateBlock('loading', 'Loading…'));
     return;
+  }
+
+  const routeKey = r.name + '/' + r.param;
+  const awaits = ['book', 'service', 'version'].includes(r.name);
+  // Only a *different* route gets the loading block: a poll re-rendering the
+  // page you are reading must not blank it for the length of one fetch.
+  if (awaits) {
+    if (lastRoute !== routeKey) setHtml(view, stateBlock('loading', 'Loading…'));
+    view.setAttribute('aria-busy', 'true');
   }
 
   let html;
@@ -1749,12 +2030,32 @@ async function render() {
   renderMasthead();
   renderBanner();
   renderRail();
-  $('#view').innerHTML = html;
+  setHtml(view, html);
+  view.removeAttribute('aria-busy');
+  lastRoute = routeKey;
+
+  const title = viewTitle || TITLES[r.name];
+  document.title = title ? title + ' | Goodreads' : 'Goodreads';
+  const fv = $('#footer-version');
+  if (fv) fv.textContent = state.version ? 'v' + state.version : '';
+
   const headerSearch = $('#global-search');
   if (headerSearch && headerSearch.value !== searchTerm) headerSearch.value = searchTerm;
+  // Never closed on an empty term: a poll would shut a box just opened.
+  if (searchTerm) {
+    $('.bar')?.classList.add('search-open');
+    $('.search-toggle')?.setAttribute('aria-expanded', 'true');
+  }
+
+  if (navigated) {
+    navigated = false;
+    window.scrollTo(0, 0);
+    const h = $('#view h1[tabindex="-1"]');
+    if (h) h.focus({ preventScroll: true });
+  }
 }
 
-async function refresh() {
+async function refresh(opts = {}) {
   try {
     const r = route();
     const wantsSettings = r.name === 'services' || r.name === 'service';
@@ -1770,6 +2071,27 @@ async function refresh() {
     ]);
     state = s;
     issues = i;
+
+    // A deployed version the page has never seen means the cached history and
+    // the loaded interface are both out of date.
+    if (versionHistory && s.version && versionHistory.current !== s.version) versionHistory = null;
+    if (s.version) {
+      if (announcedVersion && announcedVersion !== s.version) {
+        toast('goodreads updated to v' + s.version, 'Reload the page to load the new interface.');
+      }
+      announcedVersion = s.version;
+    }
+
+    // Typing into a credential field must survive the poll. The header, banner
+    // and rail hold no inputs, so they stay live while the view waits.
+    if (opts.poll && isEditing()) {
+      renderMasthead();
+      renderBanner();
+      renderRail();
+      renderPending = true;
+      return;
+    }
+
     if (wantsSettings && !settingsFields) {
       settingsFields = await api('/api/settings').catch(() => null);
     }
@@ -1804,8 +2126,8 @@ async function refresh() {
     await render();
   } catch (err) {
     if (String(err.message).includes('session expired')) return;
-    $('#view').innerHTML = `<div class="panel"><div class="body">
-      Could not reach goodreads: ${escapeHtml(err.message)}</div></div>`;
+    setHtml($('#view'), stateBlock('error', 'Could not reach goodreads: ' + err.message,
+      '<button class="tiny" onclick="refresh()">Retry</button>'));
   }
 }
 
@@ -1816,6 +2138,24 @@ window.addEventListener('hashchange', () => {
   // A different service means a different payload; never serve the last one.
   if (route().name !== 'service') serviceDetail = null;
   else if (serviceDetail && serviceDetail.service !== canonicalService(route().param)) serviceDetail = null;
+  navigated = true;
   refresh();
 });
-document.addEventListener('DOMContentLoaded', () => { refresh(); setInterval(refresh, 6000); });
+
+// Author and genre links carry their term in an attribute rather than in an
+// onclick, so a title with a quote in it cannot break the handler.
+document.addEventListener('click', e => {
+  const a = e.target.closest?.('[data-search]');
+  if (!a) return;
+  e.preventDefault();
+  onHeaderSearch(a.dataset.search);
+});
+
+document.addEventListener('DOMContentLoaded', () => {
+  refresh();
+  setInterval(() => refresh({ poll: true }), 6000);
+  // A poll held back while a field had focus lands the moment focus leaves.
+  $('#view')?.addEventListener('focusout', () => {
+    if (renderPending) { renderPending = false; render(); }
+  });
+});

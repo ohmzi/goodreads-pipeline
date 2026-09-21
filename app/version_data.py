@@ -8,6 +8,64 @@ from __future__ import annotations
 
 VERSION_HISTORY: list[dict] = [
     {
+        "version": "1.1",
+        "date": "2026-09-21",
+        "summary": (
+            "Goodreads-faithful redesign, a service breaker for outages, "
+            "and a fiction-classification fix."
+        ),
+        "sections": [
+            {
+                "heading": "Reliability",
+                "items": [
+                    "A per-service circuit breaker: three consecutive transient failures against one service holds every book waiting on it, instead of each one failing, waiting out its own clock and parking independently. A restart or a resolved outage is caught by a half-open probe on one book; a stuck hold can be released by hand from the service's page.",
+                    "The issues panel folds every book a held service is blocking into one row naming the service, with a fix message that escalates once the outage outlives the 24-hour transient grace instead of saying \"nothing to do\" forever.",
+                    "A 408/425/429 from a source is now its own failure kind (busy) instead of falling through unclassified, and a Retry-After header is parsed and honoured.",
+                ],
+            },
+            {
+                "heading": "Classification",
+                "items": [
+                    "A precedence rule in categories.yml: any genre that names fiction resolves to Fiction ahead of the longest-needle scan, so a book tagged both \"Historical Fiction\" and \"Fiction\" no longer files under History on the strength of the longer word.",
+                    "The new reclassify CLI command re-runs classification over the whole library against the current rules and reports (or, with --apply, makes) the moves needed to match.",
+                ],
+            },
+            {
+                "heading": "Sign-in",
+                "items": [
+                    "The sign-in page is rebuilt against the real goodreads.com sign-in page, measured rather than approximated: a white page, a narrow centred column, no card, no cream — matching its actual geometry down to the wordmark, heading and input sizes.",
+                    "A working \"Keep me signed in.\" checkbox: leaving it ticked keeps the existing 7-day session, unticking it issues a 12-hour one instead.",
+                    "The browser tab icon is goodreads.com's own, served from a real /favicon.ico route instead of an inline placeholder.",
+                ],
+            },
+            {
+                "heading": "Interface",
+                "items": [
+                    "Page chrome follows goodreads.com's classic system: a white page, cream #f4f1ea callouts, a #faf8f6 header and footer, 1px #d8d8d8 borders, and a lowercase Merriweather \"goodreads\" wordmark.",
+                    "A footer on every page with the section links, the project links and the running version, in place of the page just ending.",
+                    "Book rows read like shelf rows (2:3 cover, serif title, Lato byline, eight stage dots with a count) and the book page puts the cover, retry action and Goodreads link in a left column beside a serif title and a genre link row.",
+                    "Six-second polling no longer wipes what you typed into a credential field or drops keyboard focus: identical renders are skipped and typed values and focus are restored.",
+                ],
+            },
+            {
+                "heading": "Version page",
+                "items": [
+                    "#/version lists every release with its date and a one-line summary, changes grouped by area, the running build tagged current.",
+                    "The right rail shows the running version with a \"What's new\" dot that clears once the page has been opened in this browser.",
+                    "/api/state carries version and FastAPI reads the version from app/__init__.py.",
+                ],
+            },
+            {
+                "heading": "Accessibility and polish",
+                "items": [
+                    "Every link, button, input, row and tile has a visible 2px teal keyboard focus ring; service cards are real links; pages set their own tab title and move focus to the page title after navigation.",
+                    "Toasts are announced to screen readers, can be dismissed, pause on hover, and error toasts stay until closed.",
+                    "The Goodreads browser page shows an idle state with the three steps and the start button in place of a black frame.",
+                ],
+            },
+        ],
+    },
+    {
         "version": "1.0",
         "date": "2026-09-20",
         "summary": (

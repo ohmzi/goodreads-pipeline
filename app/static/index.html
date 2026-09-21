@@ -20,30 +20,43 @@
        only goes dark (#32362d) under the pointer. -->
   <header class="bar">
     <div class="bar-inner">
-      <a class="wordmark" href="#/">Good<span>reads</span></a>
-      <nav class="nav" id="nav"></nav>
+      <a class="wordmark" href="#/">goodreads</a>
+      <nav class="nav" id="nav" aria-label="Primary"></nav>
       <span class="spacer"></span>
       <div class="bar-search">
         <input type="search" id="global-search" placeholder="Search books"
                oninput="onHeaderSearch(this.value)" autocomplete="off" aria-label="Search books">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#222" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg>
       </div>
+      <!-- Only shown under 1000px, where the search box drops to its own row. -->
+      <button class="search-toggle" type="button" onclick="toggleSearch()" aria-label="Search books" aria-expanded="false" aria-controls="global-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg></button>
       <!-- The one control with no Goodreads equivalent: service health, always
            on screen, one click from the page that explains and logs it. -->
       <a class="health-pill" id="health-pill" href="#/services"></a>
       <div class="bar-account">
-        <span class="who" id="headline"></span>
-        <button class="ghost tiny" onclick="signOut()">Sign out</button>
+        <a class="nav-link" href="#" onclick="signOut();return false;">Sign out</a>
       </div>
     </div>
   </header>
 
   <div class="page" id="page">
-    <div class="col" id="main">
+    <main class="col" id="main">
       <div id="banner"></div>
-      <div id="view"><div class="empty">Loading…</div></div>
-    </div>
-    <aside class="rail" id="rail"></aside>
+      <div id="view"><div class="state loading" role="status">Loading…</div></div>
+    </main>
+    <aside class="rail" id="rail" aria-label="Service status and run control"></aside>
   </div>
+
+  <!-- Sibling of .page, not a cell in it: the footer spans the full width and
+       stays under the rail on every breakpoint. -->
+  <footer class="site-footer">
+    <div class="site-footer-inner">
+      <div><h4>Pages</h4><a href="#/">Home</a><a href="#/books">My Books</a><a href="#/services">Services</a><a href="#/activity">Activity</a></div>
+      <div><h4>Project</h4><a href="https://github.com/ohmzi/goodreads-pipeline" target="_blank" rel="noopener">GitHub</a><a href="https://github.com/ohmzi/goodreads-pipeline/blob/main/docs/VERSION.md" target="_blank" rel="noopener">Release notes</a><a href="#/version">Version history</a></div>
+      <div><h4>Session</h4><a href="/goodreads">Sign in to Goodreads</a><a href="#" onclick="signOut();return false;">Sign out</a></div>
+      <div class="legal">© 2026 goodreads-pipeline · self-hosted<br><a id="footer-version" href="#/version"></a></div>
+    </div>
+  </footer>
 </div>
 
 <div id="toasts"></div>
