@@ -195,7 +195,7 @@ process. The process's own version is the FastAPI app version
 | `progress` | object | Book id -> live download detail; empty when nothing is mid-download |
 | `_debug_samples` | int | Size of the in-process ETA sampler. A diagnostic counter, not a queue depth |
 | `goodreads` | object | `user_id`, `session_age`, `has_session` |
-| `sweep` | object | The last sweep's summary; `{}` until one has run |
+| `sweep` | object | The last sweep's summary; `{}` until one has run. Carries `held` (books whose only runnable stage the breaker refused) and `breaker` (service -> state), so a quiet sweep explains itself |
 | `paths` | object | `books_root`, `audiobooks_root`, `staging` |
 
 Two keys do work when you ask for them:
@@ -228,6 +228,17 @@ the world rather than twenty problems (`app/main.py:558-625`):
 | `groups[].books` | `[{id, title}]` |
 | `counts` | `failed_books`, `partial_books`, `issue_groups`, `actionable_groups`, `needs_review` |
 | `needs_review` | `[{id, title, category}]` |
+
+One group is synthetic. When the service breaker is holding a service — three
+consecutive transient failures, so nothing is attempted against it — `/api/issues`
+emits **one** group for that service instead of one per affected book: `stage` is
+the pseudo-stage `"held"` (never a real stage name, so the book detail view's
+per-stage `fix` lookup cannot match it), `service` is set, `actionable` is `true`
+so the row renders at all, and `detail` carries the count and, past the 24-hour
+grace, the outage's age. `fix` says there is nothing to do until the grace is
+outlived. The books themselves are `blocked` with `held_by` set, so they are not
+counted in `counts.failed_books` and they resume by themselves
+(`app/breaker.py`, `app/main.py:603-700`).
 
 Groups are ordered actionable-first, then by how many books they hold. The
 `failed`/`partial`/`unavailable`/`working` classification behind those counts is
@@ -302,9 +313,12 @@ so it needs a live Goodreads session and a few seconds (`app/reconcile.py:46-86`
 
 The summary is `{"services": [...], "unhealthy": [...], "auth_failures": [...],
 "all_ok": bool}`. Each entry in `services` carries `service`, `label`, `impact`,
-`checked`, `ok`, `detail`, `failure_kind`, `checked_at` and `ok_since`
-(`app/health.py:154-179`). `ok` is `null` for a service that has never been
-probed. `POST .../check` is the only way to force a probe without waiting for
+`checked`, `ok`, `detail`, `failure_kind`, `checked_at`, `ok_since` and
+`breaker` (`app/health.py:154-179`, `app/main.py:577-598`). `ok` is `null` for a
+service that has never been probed. `breaker` is `{state, open_until,
+opened_at, trips, failures, last_failure}` and is `closed` for every service that
+has never failed, so a script can ask "is the pipeline holding work on this
+service" without reading the issue panel's prose. `POST .../check` is the only way to force a probe without waiting for
 the five-minute timer or triggering a sweep (`app/main.py:537-543`).
 
 `all_ok` is computed from the last stored probe of each service, not from a
@@ -321,6 +335,7 @@ on a service page is a different, weaker check — the difference is in
 | Method | Path | Session | Request | Returns |
 |---|---|---|---|---|
 | GET | `/api/services/{name}` | yes | — | One service end to end; `404 {"detail": "unknown service <name>"}` |
+| POST | `/api/services/{name}/breaker/clear` | yes | — | Release a held service by hand; `404` for a name that is not a service |
 
 `name` is canonicalised — lowercased with spaces removed — so `Open Notebook`
 and `opennotebook` are the same request (`app/health.py:61-71`).
@@ -334,6 +349,7 @@ missing credential is reported from.
 | `health` | This service's row from the summary above, or `null` |
 | `url` | The endpoint this instance is configured to call (`app/main.py:910-920`) |
 | `fields` | The stored credentials belonging to this service, as `{key, label, hint, is_set}` — never values. Empty for a service with no credential prefix mapped, which includes Shelfmark |
+| `breaker` | This service's breaker state, `closed` for one that has never failed |
 | `stages` | The per-book stages this service is on the hook for (`app/health.py:50-58`) |
 | `held` | Every book currently `failed` or `blocked` on this service: `{id, title, stage, status, detail, failure_kind, attempts}` |
 | `events` | Up to 80 log lines for this service |
@@ -344,6 +360,21 @@ missing credential is reported from.
 unreachable service is exactly what the page exists to show. `events_inferred`
 is set when the recorded column was empty, which on an older database is true
 until the next probe writes a row (`app/main.py:1004-1022`).
+
+`POST .../breaker/clear` is the only endpoint that changes a breaker without
+evidence, and it exists because the alternative is a library that has stopped
+acquiring with nothing able to restart it: a hold ends when the service proves
+it is answering, and a breaker nothing can prove anything about would otherwise
+hold forever. It releases the books and clears the per-book clock exactly as a
+recovery does, and returns `{service, label, was, cleared, released,
+was_open_for_hours, was_open_until, message}` — `cleared: false` with `released:
+0` when nothing was held (a double click, a stale page), never an error.
+Nothing in the response claims the service answered: `message` says it was
+cleared by hand and that the next sweep will re-trip it if it is still down,
+and `last_ok_at` on the row is left untouched, because a click is not a probe.
+The UI calls this from **Clear hold**, behind a confirmation. POST only — a
+`GET` on the path is not routed to it at all, so a link or a prefetch cannot
+release a hold (`app/breaker.py:732-813`, `app/main.py:1183-1206`).
 
 ### Settings
 
