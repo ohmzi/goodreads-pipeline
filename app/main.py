@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.concurrency import run_in_threadpool
 
-from . import auth, models, version_data
+from . import auth, breaker, models, version_data
 from .clients.abs_client import AudiobookshelfClient
 from .clients.base import ClientError
 from .clients.booklore import BookLoreClient, GrimmoryClient
@@ -124,6 +124,10 @@ def health() -> dict:
 class LoginBody(BaseModel):
     username: str
     password: str
+    # Defaults to the long session, so any caller that does not send the flag
+    # behaves exactly as it did before it existed. The sign-in page's "Keep me
+    # signed in." checkbox is what turns it off.
+    keep_signed_in: bool = True
 
 
 def _client_key(request: Request) -> str:
@@ -146,6 +150,11 @@ def _client_key(request: Request) -> str:
 #: design, so without a cap a flood of concurrent attempts would pin the CPU
 #: and allocate far more than this box should be asked for.
 _login_slots = asyncio.Semaphore(8)
+
+#: What a sign-in gets when "Keep me signed in." is unticked: the cookie stops
+#: twelve hours later rather than at the full session lifetime, which is all a
+#: shared machine should be trusted with.
+_SHORT_TTL_SECONDS = 12 * 3600
 
 
 @app.post("/api/auth/login")
@@ -193,11 +202,15 @@ async def auth_login(body: LoginBody, request: Request) -> JSONResponse:
     auth.throttle.record_success(user_key)
     db().log(f"login: {username} from {_client_key(request)}")
 
+    ttl = auth.SESSION_TTL_SECONDS if body.keep_signed_in else _SHORT_TTL_SECONDS
+
     response = JSONResponse({"ok": True, "username": username})
     response.set_cookie(
         auth.COOKIE_NAME,
-        auth.issue_session(username, epoch),
-        max_age=auth.SESSION_TTL_SECONDS,
+        auth.issue_session(username, epoch, ttl),
+        # The cookie and the token must expire together: a longer max_age would
+        # leave the browser sending a cookie the server has already rejected.
+        max_age=ttl,
         httponly=True,
         samesite="lax",
         # Plain HTTP on the LAN by default. Turn on via COOKIE_SECURE=1 once
@@ -343,6 +356,22 @@ def index() -> HTMLResponse:
 @app.get("/login")
 def login_page() -> HTMLResponse:
     return _render_page("login.html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """The tab icon: goodreads.com's own.
+
+    It already had a slot in PUBLIC_PATHS, which is where it belongs — a
+    browser asks for this before anyone has a session, so a gated one would
+    come back as a redirect to the sign-in page and the tab would show
+    nothing. Long-lived because it never changes.
+    """
+    return FileResponse(
+        STATIC_DIR / "favicon.ico",
+        media_type="image/x-icon",
+        headers={"Cache-Control": "public, max-age=604800"},
+    )
 
 
 @app.get("/goodreads")
@@ -541,12 +570,34 @@ def state() -> dict:
     }
 
 
+def _with_breakers(payload: dict) -> dict:
+    """Fold breaker state into a health summary.
+
+    Done here rather than in `health` so `health` stays import-free of
+    `breaker` and the dependency graph stays acyclic (`breaker` reads `health`).
+    The JS ignores unknown keys, so this is inert until the UI renders it — it
+    exists so a script or a test can see the state without parsing prose.
+    """
+    states = breaker.states()
+    for entry in payload.get("services", []):
+        row = states.get(entry["service"]) or {}
+        entry["breaker"] = {
+            "state": row.get("state", "closed"),
+            "open_until": row.get("open_until"),
+            "opened_at": row.get("opened_at"),
+            "trips": int(row.get("trips") or 0),
+            "failures": int(row.get("failures") or 0),
+            "last_failure": row.get("last_failure") or "",
+        }
+    return payload
+
+
 @app.get("/api/health/services")
 def services_health() -> dict:
     """Credential and reachability status for every service we depend on."""
     from .health import summary
 
-    return summary()
+    return _with_breakers(summary())
 
 
 @app.post("/api/health/services/check")
@@ -555,7 +606,7 @@ def services_health_check() -> dict:
     from .health import check_all, summary
 
     check_all()
-    return summary()
+    return _with_breakers(summary())
 
 
 @app.post("/api/reconcile")
@@ -582,9 +633,25 @@ def issues() -> dict:
 
     books = db().list_books()
     groups: dict[tuple[str, str, str, str], dict] = {}
+    # Books the breaker is holding, gathered per service so they can be
+    # rendered as one row instead of never (a hold is not a failure, so the
+    # loop below would skip every one of them) or as 169.
+    held: dict[str, list[dict]] = {}
+    held_seen: dict[str, set] = {}
 
     for book in books:
         for stage, run in (book.get("stages") or {}).items():
+            if run.get("status") == models.BLOCKED and run.get("held_by"):
+                svc = canonical(run["held_by"])
+                seen = held_seen.setdefault(svc, set())
+                # Deduplicated by book: one book can be held on two stages at
+                # once (ebook and audiobook) and it is one book.
+                if book["id"] not in seen:
+                    seen.add(book["id"])
+                    held.setdefault(svc, []).append(
+                        {"id": book["id"], "title": book["title"]}
+                    )
+                continue
             if run.get("status") != models.FAILED:
                 continue
             kind = run.get("failure_kind") or ""
@@ -617,6 +684,36 @@ def issues() -> dict:
                 },
             )
             group["books"].append({"id": book["id"], "title": book["title"]})
+
+    # One synthetic row per service the breaker is holding. This is the whole
+    # point of the breaker: an outage that would have been 169 book rows is one
+    # line naming the service, with the books listed under it.
+    for svc, row in breaker.open_breakers().items():
+        books_held = held.get(svc, [])
+        hours = breaker.age_hours(row.get("opened_at"))
+        # A pseudo-stage. The row is about a service, not a stage, and the JS
+        # renders an unknown stage as itself; using a real stage name would be
+        # a lie about which of the two acquire stages is held, and would also
+        # let the book page's per-stage `fix` lookup match this group and
+        # replace a book's own explanation with the outage's.
+        key = ("", "network", svc, f"breaker:{svc}")
+        groups[key] = {
+            "stage": "held",
+            "kind": "network",
+            "service": svc,
+            "service_label": label_for(svc),
+            "impact": IMPACT.get(svc, ""),
+            "detail": breaker.headline(svc, len(books_held), hours),
+            "sample": row.get("last_failure") or "",
+            "books": books_held,
+            "fix": _fix_for_breaker(svc, row["state"], hours),
+            # Required for the row to render at all (`renderIssuePreview`
+            # filters on it), and not a claim that the operator can *do*
+            # something — the `fix` line is what says otherwise. Dropping it
+            # would let the panel read "Nothing needs attention" while 169
+            # books sat untouched.
+            "actionable": True,
+        }
 
     ordered = sorted(
         groups.values(),
@@ -658,6 +755,11 @@ def _cause_bucket(stage: str, kind: str, detail: str) -> tuple[str, str]:
         return f"auth:{detail[:60].lower()}", detail[:160]
     if kind == "network":
         return "network", "Service could not be reached"
+    if kind == "busy":
+        # One bucket, not one per message: a rate limit is one condition
+        # however many books it touched, and the detail below already carries
+        # the service's own words.
+        return "busy", "The service is rate-limiting requests"
     if kind == "server":
         return f"server:{detail[:60].lower()}", detail[:160]
     if "shelfmark reported" in lowered:
@@ -693,7 +795,14 @@ FORMAT_STAGES = ("acquire_ebook", "acquire_audiobook")
 
 #: Failures a human can act on. Everything else is either a fact about the
 #: world or a transient condition the pipeline handles itself.
-ACTIONABLE_KINDS = ("auth", "network", "server")
+#:
+#: `busy` belongs here even though it is the most transient of the lot: when a
+#: breaker holds the service, no book is attempted against it and this never
+#: reaches the panel at all. What it catches is the case where the breaker is
+#: *not* tripping — one book, one 429, no outage — and then a rate limit that
+#: keeps happening is a real thing to be told about rather than something to
+#: bury in `partial`.
+ACTIONABLE_KINDS = ("auth", "network", "server", "busy")
 
 
 def book_state(book: dict) -> str:
@@ -745,9 +854,16 @@ def book_state(book: dict) -> str:
     # book is working; once it is merely stuck waiting on a source, the book is
     # as finished as it is going to get and belongs in "audiobook missing".
     if outstanding <= {"acquire_audiobook"}:
-        audio = (stages.get("acquire_audiobook") or {}).get("status")
+        audio_run = stages.get("acquire_audiobook") or {}
+        audio = audio_run.get("status")
         placed = (stages.get("place") or {}).get("status") == models.OK
-        if housed(audio) and placed:
+        # `housed()` counts BLOCKED as settled, which is right for "the
+        # audiobook does not exist anywhere" and wrong for a breaker hold: that
+        # book is not finished being looked for, it is waiting on a source to
+        # come back. Calling it `partial` would leave it looking settled while
+        # the pipeline was actively waiting, which is worse than the truthful
+        # `failed` it reads as today.
+        if housed(audio) and placed and not (audio_run.get("held_by") or ""):
             return "partial"
 
     return "working"
@@ -807,6 +923,9 @@ def _fix_for(stage: str, kind: str, detail: str, service: str = "") -> str:
         return f"{who + ' could not be reached' if who else 'The service could not be reached'} — check it is running, then retry."
     if kind == "server":
         return f"{who + ' returned an error' if who else 'The service returned an error'} — usually transient; retry, and check {where} if it persists."
+    if kind == "busy":
+        return (f"{who + ' is rate-limiting requests' if who else 'The service is rate-limiting requests'}"
+                f" — the pipeline slows down and retries. Nothing to fix unless it lasts; check {where}.")
     if "no audiobook releases" in lowered:
         return "No audiobook exists in any configured source. Nothing to fix; retry later or shelve the ebook alone."
     if "no ebook releases" in lowered:
@@ -820,6 +939,40 @@ def _fix_for(stage: str, kind: str, detail: str, service: str = "") -> str:
     if stage == "shelve":
         return "The Goodreads shelf move failed. Re-login to Goodreads if the session expired."
     return "Retry from the book's detail view; if it persists, check the service's logs."
+
+
+def _fix_for_breaker(service: str, state: str, hours: float = 0.0) -> str:
+    """What to do about a held service — usually "nothing, yet".
+
+    The escalation is the part that matters. A young outage really is not the
+    operator's to fix, and saying so is the honest answer rather than a shrug;
+    but the same line would keep saying it forever, so once the outage has
+    outlived `TRANSIENT_GRACE_HOURS` the sentence changes and points at the
+    service itself. That is what keeps the breaker from being the thing that
+    hides a permanently dead upstream.
+    """
+    from .health import label_for
+    from .pipeline import TRANSIENT_GRACE_HOURS
+
+    who = label_for(service)
+    where = f"{who}'s service page"
+    if hours >= TRANSIENT_GRACE_HOURS:
+        return (
+            f"{who} has been unable to reach its sources for {hours:.0f} hours "
+            f"— past the {TRANSIENT_GRACE_HOURS}h grace, so this is not a "
+            f"passing outage. Check {who} itself; open {where} to see what it "
+            f"is saying."
+        )
+    if state == "half_open":
+        return (
+            f"Retrying now, one book at a time. Nothing to do — these resume "
+            f"on their own; open {where} to see what it is saying."
+        )
+    return (
+        f"Nothing to fix: these resume by themselves once {who} answers again. "
+        f"{who} is up — the fault is upstream. Open {where} to see what it is "
+        f"saying."
+    )
 
 
 @app.get("/api/books/{book_id}")
@@ -998,10 +1151,21 @@ def service_detail(name: str) -> dict:
     label = label_for(key)
     events, inferred = _events_for(key, label)
 
+    breaker_row = breaker.states().get(key) or {}
     return {
         "service": key,
         "label": label,
         "health": row,
+        # Present for every service, `closed` for most: a script or a test can
+        # ask "is the pipeline holding work on this service" without reading
+        # the issue panel's prose.
+        "breaker": {
+            "state": breaker_row.get("state", "closed"),
+            "open_until": breaker_row.get("open_until"),
+            "opened_at": breaker_row.get("opened_at"),
+            "trips": int(breaker_row.get("trips") or 0),
+            "last_failure": breaker_row.get("last_failure") or "",
+        },
         "url": _service_urls().get(key, ""),
         "fields": _fields_for(key),
         "stages": list(SERVICE_STAGES.get(key, ())),
@@ -1014,6 +1178,35 @@ def service_detail(name: str) -> dict:
         # A service page is also how you get to Goodreads' own sign-in flow.
         "login_url": "/goodreads" if key == "goodreads" else "",
     }
+
+
+@app.post("/api/services/{name}/breaker/clear")
+def clear_breaker(name: str) -> dict:
+    """Release a held service by hand: the way out of a wedged breaker.
+
+    Every other exit from a hold is the service proving it is answering, which
+    is the right default and no use at all when nothing can prove it — a
+    breaker whose probes keep coming back with no evidence holds a working
+    service, and there is no clock that closes it, no restart that clears it
+    (the state is a row, not memory) and no button anywhere that did. The
+    failure is silent, so the escape hatch has to be easy to reach and blunt
+    about what it did: `breaker.clear` owns the honesty (it releases the books
+    exactly as a recovery does, logs a `warning` naming the operator, and does
+    not stamp `last_ok_at` or claim the service answered); this endpoint is the
+    reach, and `app.js` confirms before calling it.
+
+    POST and only POST. A GET on this path never reaches the handler — the SPA
+    fallback is registered last, matches every GET, and answers `/api/...` with
+    404 rather than the page — so a link, a prefetch or a reload cannot release
+    anything. The body is the breaker's own account of what it did,
+    `breaker.clear`'s return verbatim, and the panel prints its `message`.
+    """
+    from .health import LABELS, canonical
+
+    key = canonical(name)
+    if not key or key not in LABELS:
+        raise HTTPException(404, f"unknown service {name}")
+    return breaker.clear(key, reason="cleared by hand from the services panel")
 
 
 def _events_for(service: str, label: str) -> tuple[list[dict], bool]:
