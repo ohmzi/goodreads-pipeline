@@ -161,7 +161,7 @@ from `app/static/`.
 ### Failures arrive with their cause and their fix
 
 A failure is only useful if you can act on it, so every failed stage carries a
-`failure_kind` — `auth`, `network`, `server`, `data` — and the UI groups
+`failure_kind` — `auth`, `network`, `server`, `busy`, `data` — and the UI groups
 failures by *cause*, not by book. Twenty books with no audiobook available is
 one fact about the world, not twenty problems, and it is shown separately from
 the handful of things you can actually fix.
