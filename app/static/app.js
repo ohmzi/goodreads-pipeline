@@ -433,14 +433,27 @@ function closeAccountMenu() {
   $('.menu-toggle')?.setAttribute('aria-expanded', 'false');
 }
 
-// A dropdown with no way to dismiss it except its own toggle is a trap on a
-// phone, where "tap elsewhere" is the only gesture anyone tries first.
+function closeSearch() {
+  const bar = $('.bar');
+  if (!bar || !bar.classList.contains('search-open')) return;
+  // An active filter stays visible until it is cleared or the icon is
+  // pressed again — the same reason a poll leaves it open (see render()) —
+  // so an outside tap only ever collapses an *empty* box someone opened
+  // and then didn't use.
+  if (searchTerm) return;
+  bar.classList.remove('search-open');
+  $('.search-toggle')?.setAttribute('aria-expanded', 'false');
+}
+
+// A dropdown or an expanded search box with no way to dismiss it except its
+// own toggle is a trap on a phone, where "tap elsewhere" is the only gesture
+// anyone tries first.
 document.addEventListener('click', (event) => {
-  if (event.target.closest('.menu-toggle, .acct-panel')) return;
-  closeAccountMenu();
+  if (!event.target.closest('.menu-toggle, .acct-panel')) closeAccountMenu();
+  if (!event.target.closest('.search-toggle, .bar-search')) closeSearch();
 });
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') closeAccountMenu();
+  if (event.key === 'Escape') { closeAccountMenu(); closeSearch(); }
 });
 // The health pill inside the dropdown is itself a link to #/services — the
 // outside-click check above lets that click through (it's inside
