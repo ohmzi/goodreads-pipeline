@@ -2054,8 +2054,13 @@ a[target="_blank"]:active {
      wordmark's benefit at every other time. */
   .bar.search-open .bar-inner { padding-left: 8px; padding-right: 8px; }
   .bar.search-open .wordmark, .bar.search-open .menu-toggle { display: none; }
+  /* grid-column: 2 / -1, not the base rule's 1 / -1: column 1 is
+     .search-toggle's own cell, and .search-toggle stays on screen as the
+     close control while search is open (it comes after .bar-search in the
+     DOM, so left at 1 / -1 the two would occupy the same cell and the icon
+     would paint over the input's left edge instead of sitting beside it). */
   .bar.search-open .bar-search {
-    display: flex; align-items: center; margin: 0 0 0 4px;
+    display: flex; align-items: center; grid-column: 2 / -1; margin: 0 0 0 4px;
   }
   /* A single ring, not the border-colour change plus a separately offset
      outline stacking into the heavy double ring a phone's touch focus
