@@ -2046,12 +2046,48 @@ a[target="_blank"]:active {
      the row can ever move when it opens — and its own reveal is a
      transitionable clip-path instead of an instant swap. */
   .bar-search {
-    position: absolute; left: 48px; right: 12px; top: 8px; height: 32px;
+    position: absolute; left: 52px; right: 12px; top: 8px; height: 32px;
+    /* width and max-width are RESETS, not decoration: the base rule sets
+       width:155px/max-width:270px for the desktop navbar, and an absolutely
+       positioned box with left, right AND a definite width is over-
+       constrained — the browser drops `right` and renders it 270px wide.
+       That is why this stopped a little past halfway across the row with
+       the wordmark still showing beside it. margin goes for the same
+       reason: the base rule's 9px top would fight `top` here. */
+    width: auto; max-width: none; margin: 0;
     display: flex; align-items: center; z-index: 5; pointer-events: none;
     background: var(--paper);
+    border: 1px solid var(--line-warm); border-radius: 16px;
     clip-path: inset(0 100% 0 0);
   }
   .bar.search-open .bar-search { clip-path: inset(0 0 0 0); pointer-events: auto; }
+  /* The pill is the control now, so it carries the focus state — one halo
+     rather than the field's own border going teal underneath a separate
+     offset ring on top of it, which is what read as a heavy double border.
+     The wash is mixed from --teal rather than being a second teal. */
+  .bar-search:focus-within {
+    border-color: var(--teal);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 14%, transparent);
+  }
+  /* ...and the field inside it is bare: no border, no fill, no ring of its
+     own, just text in the pill. */
+  .bar .bar-search input {
+    height: 100%; width: 100%; padding: 0 16px;
+    background: transparent; border: 0; border-radius: inherit;
+    font-size: 15px; color: var(--ink);
+  }
+  .bar-search input:focus { border-color: transparent; }
+  .bar-search input:focus-visible { outline: none; }
+  /* The magnifier inside the field is redundant beside the toggle that
+     opened it — two magnifying glasses side by side is most of what made
+     this look unfinished. */
+  .bar-search svg { display: none; }
+
+  /* The toggle turns into a back arrow while search is open: a magnifier
+     that means "close the search" is a glyph arguing with itself. */
+  .search-toggle .glyph-back { display: none; }
+  .bar.search-open .search-toggle .glyph-search { display: none; }
+  .bar.search-open .search-toggle .glyph-back { display: block; }
   /* The slide itself, kept out of the base rule above: this file refuses
      motion outright when the viewer has asked for less of it (see "the
      press" further down), and open/close still has to work instantly
@@ -2079,16 +2115,6 @@ a[target="_blank"]:active {
      the moment they are covered, whether or not the sweep has visually
      reached them yet. */
   .bar.search-open .wordmark, .bar.search-open .menu-toggle { pointer-events: none; }
-  /* A single ring, not the border-colour change plus a separately offset
-     outline stacking into the heavy double ring a phone's touch focus
-     produces on a text input (Chrome treats a focused text field as
-     :focus-visible regardless of pointer vs. keyboard, unlike most other
-     controls) — flush offset and a neutral border let the ring alone carry
-     the affordance here, and a touch larger radius reads more like a search
-     field taking over the row and less like every other 3px control. */
-  .bar.search-open .bar-search input { border-radius: 8px; }
-  .bar.search-open .bar-search input:focus { border-color: var(--line); }
-  .bar.search-open .bar-search input:focus-visible { outline-offset: 0; border-radius: 8px; }
 
   /* Android's default tap highlight on a bare icon button reads as a stray
      grey box the instant it's pressed; a deliberate round wash on press and

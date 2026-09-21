@@ -411,7 +411,12 @@ function toggleSearch() {
   if (!bar) return;
   const open = bar.classList.toggle('search-open');
   const btn = $('.search-toggle');
-  if (btn) btn.setAttribute('aria-expanded', String(open));
+  if (btn) {
+    btn.setAttribute('aria-expanded', String(open));
+    // The glyph swaps to a back arrow when open (see app.css); the name has
+    // to follow it, or it keeps announcing "Search books" while it closes.
+    btn.setAttribute('aria-label', open ? 'Close search' : 'Search books');
+  }
   if (open) { $('#global-search')?.focus(); bar.classList.remove('menu-open'); }
 }
 
