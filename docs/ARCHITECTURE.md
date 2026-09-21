@@ -182,12 +182,13 @@ so could never record a result (`app/db.py:202-226`, `app/main.py:353-358`).
 | Table | Columns | Purpose |
 |---|---|---|
 | `books` | `id`, `goodreads_id` (unique), `title`, `author`, `isbn`, `isbn13`, `year`, `cover_url`, `goodreads_url`, `genres` (JSON array text), `genre_source`, `category`, `needs_review`, `auto_shelve`, `discovered_at`, `updated_at` | One row per book. `genre_source` records which provider answered, so an inferred category is distinguishable from a sourced one. |
-| `stage_runs` | `id`, `book_id` (FK, cascade), `stage`, `status`, `attempts`, `detail`, `failure_kind`, `service`, `transient_count`, `transient_since`, `artifact`, `queued_at`, `output_path`, `started_at`, `finished_at`; `UNIQUE (book_id, stage)` | The pipeline state machine. One row per book per stage. |
+| `stage_runs` | `id`, `book_id` (FK, cascade), `stage`, `status`, `attempts`, `detail`, `failure_kind`, `service`, `held_by`, `transient_count`, `transient_since`, `artifact`, `queued_at`, `output_path`, `started_at`, `finished_at`; `UNIQUE (book_id, stage)` | The pipeline state machine. One row per book per stage. |
 | `credentials` | `key`, `value` (encrypted BLOB), `updated_at` | Service credentials, entered in the UI, encrypted with the key from the environment. |
 | `users` | `username`, `password_hash`, `session_epoch`, `created_at`, `updated_at` | Logins. `session_epoch` is baked into every session token, which is what makes a password change evict outstanding sessions. |
 | `settings` | `key`, `value`, `updated_at` | Small key/value state: global `auto_shelve`, and the Goodreads user id once known. |
 | `service_map` | `service`, `name`, `remote_id`, `updated_at`; PK `(service, name)` | Cache of a library name to its id in that service, so a rescan does not re-list libraries first. |
 | `service_health` | `service` (PK), `ok`, `detail`, `failure_kind`, `checked_at`, `ok_since` | Latest probe result per service, plus how long it has been continuously healthy. |
+| `service_breaker` | `service` (PK), `state`, `failures`, `trips`, `opened_at`, `open_until`, `probe_book_id`, `probe_stage`, `probe_at`, `last_failure`, `last_ok_at`, `changed_at` | The service breaker: whether a service is currently usable at all. One row per service that has ever failed, created lazily, shared by every book. See "The service breaker" in PIPELINE.md. |
 | `events` | `id`, `ts`, `level`, `book_id`, `stage`, `service`, `message` | The activity log. `service` is written at the point the line is about a service, so a service's page does not have to guess from the text. |
 
 Two indexes: `idx_stage_book` on `stage_runs(book_id)` and `idx_events_ts` on
@@ -233,7 +234,8 @@ caused duplication or a stall:
   acquire, and the final shelf name for `shelve`, which is what `reconcile`
   compares against Goodreads.
 
-`failure_kind` (`auth`, `network`, `server`, `notfound`, `data`, or empty) is
+`failure_kind` (`auth`, `network`, `server`, `busy`, `notfound`, `data`, or
+empty) is
 what lets the UI separate "your credentials are wrong" from "try again later",
 and `service` names the service at the point of failure rather than being
 parsed back out of `detail` (`app/db.py:50-58`, `app/clients/base.py:28-49`).
@@ -242,9 +244,17 @@ Transient forgiveness has its own pair of columns. `transient_count` and
 `transient_since` are bumped per forgiven failure, and `transient_since` is set
 only on the first one, so it measures how long the *source* has been
 unavailable rather than how many times we happened to look
-(`app/db.py:386-404`). A `network` or `server` failure becomes `blocked` with a
-note about how far into the 24-hour grace it is, and stays that way until the
-grace expires (`app/pipeline.py:375-403`).
+(`app/db.py:386-404`). A `network`, `server` or `busy` failure becomes `blocked`
+with a note about how far into the 24-hour grace it is, and stays that way until
+the grace expires (`app/pipeline.py:375-403`).
+
+`held_by` is a third, narrower thing again: set when the *breaker* held the
+stage because the service is down, cleared by any other result. It is a column
+rather than something inferred from "blocked, and a service is named" because
+the UI has to tell three different kinds of `blocked` apart — an outage hold
+(this), an in-flight download (also `blocked`, but `service` is empty) and a
+one-off forgiven blip (`service` set, no `held_by`, ageing out on its own
+clock).
 
 ## Threading and concurrency
 
