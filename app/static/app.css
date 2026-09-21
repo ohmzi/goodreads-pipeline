@@ -6,405 +6,1063 @@
  * produced the wrong header once already: their nav bar is a *light* bar with
  * brown text, and #382110 is the colour of the text, not of the bar.
  *
+ * Three corrections of that kind are worth naming at the top, because each one
+ * moved the whole page:
+ *
+ *   - The page is WHITE. #f4f1ea — "the page" in an earlier revision of this
+ *     file — is the .gr-button fill, and painting the app with it made every
+ *     screen cream. body{background-color:#FFFFFF}; the warm creams are control
+ *     and panel fills (--cream, --cream-2, --cream-3).
+ *   - The header locks to 1220px (.siteHeader__contents), and the shell locks to
+ *     the same 1220px. .mainContent's 970px is not the same thing: it already
+ *     contains Goodreads' right-hand column, so a 300px rail nested inside it
+ *     left the main column 650px and collapsed the book rows. Header and page
+ *     share the one metric now; the white either side at a 1440px viewport is
+ *     most of what makes the layout read as theirs.
+ *   - The dark teal is #003b39 (.gr-button--teal:hover), not #004d48, which is
+ *     not a Goodreads value at all.
+ *
  * What is added on top is everything Goodreads never needed and a self-hosted
  * tool cannot do without — which service each failure came from, and a log to
  * prove it. Three rules keep that from turning into noise:
  *
- *   - Brown is ink, cream is page, white is content. Teal is only ever an
+ *   - Brown is ink, white is the page, cream is a control. Teal is only ever an
  *     action. If everything is teal, nothing reads as clickable.
  *   - Service problems are amber (something to know), pipeline failures are
  *     red (something to do). Never red for "a format does not exist" —
  *     that is a fact about the world, not a fault.
  *   - Every failure names its service and links to that service's page. A
  *     failure you cannot attribute is a failure you cannot act on.
+ *
+ * Two families of colour are kept apart on purpose: --ok/--warn/--err/--info
+ * are INK, for dots, numerals and inline status text, while --alert-* are
+ * Goodreads' own two .flashNotification surfaces plus their gold error box,
+ * used as backgrounds. Nothing outside the token block invents a colour; the
+ * few literals left in declarations are values their stylesheet states
+ * verbatim and no second rule can reuse.
+ *
+ * No @import, no @font-face, no external asset beyond the two s.gr-assets.com
+ * images (the wordmark SVG and the nav magnifier): Lato and Merriweather arrive
+ * from the <link> tags already in the HTML. Hundreds of declarations carry the
+ * rule they were read out of as `ref §N` — the section number in the extracted
+ * goodreads.com design notes — and, where the app needed something Goodreads
+ * has no equivalent of, the nearest real component is named instead.
+ *
+ * The file reads top to bottom in the order a page paints — tokens, reset, base
+ * type, the focus ring, helpers; then the shell and the header; then the
+ * controls and the surfaces they sit on; then the data surfaces; and last, all
+ * five media queries, because a breakpoint has to be able to override
+ * everything above it.
  */
 
 :root {
-  /* --- goodreads.com, verbatim ------------------------------------------ */
-  --bar:          #faf8f6;   /* .siteHeader__topLine background */
-  --bar-hover:    #32362d;   /* .siteHeader__topLevelLink:hover background */
-  --bar-ink:      #382110;   /* .siteHeader__topLevelLink colour */
-  --cream:        #f4f1ea;   /* the page */
-  --cream-2:      #ebe8d5;   /* .siteHeader__primaryNavSeparateLine tone */
-  --cream-3:      #ede6d6;   /* .searchBox__button:hover */
-  --paper:        #ffffff;
-  --teal:         #00635d;   /* links and actions — their most-used accent */
-  --teal-dark:    #004d48;
-  --coral:        #fa604a;   /* their alert orange */
-  --gold:         #ffd767;   /* .gr-button--choice */
-  --brown:        #382110;
-  --brown-2:      #58371f;
-  --brown-3:      #75482a;
+  /* ---- surfaces ---------------------------------------------------------
+     #FFFFFF is the page, and it is the correction that matters most: the old
+     token block said "cream is page". It is not. body{background-color:#FFFFFF}
+     and .mainContentFloat{background:#FFFFFF} (ref §1, §3); the warm creams are
+     button and panel fills. */
+  --paper:        #ffffff;   /* body, .mainContentFloat, dropdown menus, tab fill (ref §2) */
+  --cream:        #f4f1ea;   /* .gr-button / .searchBox__button fill (ref §4). The app also
+                                uses it as the resting fill for chips, pills and washes. */
+  --cream-2:      #ebe8d5;   /* .box h2 fill; .elementListBrown rule (ref §2, §7). The app
+                                uses it as the panel-heading fill and the selected-row tint. */
+  --cream-3:      #ede6d6;   /* .gr-button:hover fill (ref §4) */
+  --promo:        #fff7e9;   /* .promoBox background — the pale gold panel (ref §4) */
+  --sunk:         #f4f2e9;   /* #siteheader / #discoveryBox base (ref §4). The only verified
+                                warm grey light enough to wash a row under text. */
 
-  /* --- their greys, which is most of the palette ------------------------ */
-  --ink:          #181818;
-  --ink-2:        #333333;   /* .bookTitle colour */
-  --muted:        #666666;   /* .bookMeta colour */
-  --faint:        #767676;
-  --ghost:        #757575;   /* darkened from #999 — #999 on --paper/--cream
-                                 fails WCAG AA (~2.8:1) at the 12-13px sizes
-                                 it's used at; #757575 clears 4.5:1 */
+  /* ---- header ----------------------------------------------------------- */
+  --bar:          #faf8f6;   /* .siteHeader__topLine background — a LIGHT bar (ref §3) */
+  --bar-hover:    #32362d;   /* .siteHeader__topLevelLink:hover background (ref §3) */
+  --bar-ink:      #382110;   /* header link + heading colour, the primary ink (ref §2, §3) */
+  --brown:        #382110;   /* same value, the app's name for ink-brown */
+  --brown-2:      #58371f;   /* .gr-button--dark:hover (ref §8) */
+  --press-dark:   #1a0f07;   /* .gr-button--quiet:active (ref §4), the same value
+                                .gr-button--dark:active uses. The pressed fill for a control
+                                that is already dark: there is no darker step in the palette,
+                                and #000000 is .keyValue's ink, not a surface. Tokenised
+                                because two rules need it — the quiet button and the nav bar's
+                                links, which press one step below the fill they hover with. */
+  --masthead:     #f4f2e9;   /* signed-out masthead base (ref §2) — see --sunk */
 
-  --line:         #d8d8d8;   /* their most-used border */
-  --line-list:    #d7d7d7;   /* .elementList border-bottom */
-  --line-warm:    #d6d0c4;
-  --line-soft:    #e8e8e8;
-  --line-brown:   #ebe8d5;   /* .elementListBrown border-bottom */
+  /* ---- ink --------------------------------------------------------------
+     Five greys, each with one job. #999999 (their .greyText) is deliberately
+     absent: it is 2.8:1 on white and rule 5 of the brief forbids it. */
+  --ink:          #181818;   /* body text (ref §1) */
+  --ink-2:        #333333;   /* .bookTitle, .gr-h1..h4, button labels (ref §1, §2) */
+  --muted:        #666666;   /* .bookMeta / .keyValue label ink (ref §1, §2) */
+  --faint:        #767676;   /* small / .gr-metaText, and disabled-button ink (ref §1, §2) */
+  --ghost:        #757575;   /* LEGACY STAND-IN for .greyText #999999, darkened to clear
+                                4.5:1 at the 11–13px sizes it is used at */
+  --value:        #000000;   /* .keyValue .value / .bookMeta .value ink (ref §6) */
 
-  /* --- state ------------------------------------------------------------ */
-  --ok:           #1e7b45;
-  --ok-bg:        #eaf5ee;
-  --warn:         #9a6700;
-  --warn-bg:      #fdf5e3;
-  --err:          #a8322b;
-  --err-bg:       #fbeceb;
-  --info:         #1b5e8a;
-  --info-bg:      #eaf1f7;
+  /* ---- accent ----------------------------------------------------------- */
+  --teal:         #00635d;   /* a{} and .shelfLink — their one link accent (ref §2) */
+  --teal-dark:    #003b39;   /* .gr-button--teal:hover — CORRECTED from #004d48,
+                                which is not a Goodreads value at all (ref §7) */
+  --gold:         #ffd767;   /* .gr-button--choice fill (ref §4) */
+  --gold-ink:     #B38B22;   /* the Amazon-button border gold — the darkest verified gold,
+                                used only for large numerals (see §7) */
+  --coral:        #fa604a;   /* .gr-button--red — their alert orange (ref §2) */
 
-  /* --- shared elevation scale --------------------------------------------
-     One shadow scale for every panel/card/toast, so "how far off the page
-     something sits" reads the same everywhere instead of each block picking
-     its own rgba. sm = resting card edge, md = hover/raised, lg = floating
-     (toasts, popovers). */
-  --shadow-sm: 0 1px 3px rgba(0,0,0,.14);
-  --shadow-md: 0 2px 8px rgba(0,0,0,.20);
-  --shadow-lg: 0 6px 22px rgba(0,0,0,.18);
+  /* ---- state ------------------------------------------------------------
+     Two families, kept apart on purpose. --ok/--warn/--err/--info are INK for
+     dots, numerals and inline status text. --alert-* are the two real
+     .flashNotification surfaces, plus the gold warning box. */
+  --ok:           #29722E;   /* .wantToReadButton__checkIcon--toRead — their green ink
+                                (ref §4). 5.93:1 on white; #409D69, the button fill, is
+                                only 3.4:1 and cannot carry a 14px label. */
+  --warn:         #6b5633;   /* .flashNotification.confirm ink (ref §4) */
+  --err:          #4e1919;   /* .flashNotification.error ink (ref §4) */
+  --info:         #00635d;   /* "in flight" ink = the link teal; Goodreads has no
+                                informational blue, so the app does not invent one */
+  --info-bg:      transparent; /* kept for the name's sake: the running state has no fill */
 
-  --radius: 4px;
-  /* Their two stacks, verbatim. Lato for the interface, Merriweather for
-     titles *and* author bylines — the pairing is most of what makes the page
-     read as Goodreads rather than as a generic library app. */
-  --serif: Merriweather, Georgia, "Times New Roman", serif;
-  --sans:  Lato, "Helvetica Neue", Helvetica, Arial, sans-serif;
-  --mono:  ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --alert-err-bg:    #fce4e3;  /* .flashNotification.error background (ref §4) */
+  --alert-err-line:  #fcd1d1;  /* .flashNotification.error border (ref §4) */
+  --alert-ok-bg:     #fcf8e3;  /* .flashNotification.confirm background (ref §4) */
+  --alert-ok-line:   #fbeed5;  /* .flashNotification.confirm border (ref §4) */
+  --alert-warn-bg:   #ffef77;  /* .gr-errorMessage background (ref §2) */
+  --alert-warn-line: #ffd767;  /* .gr-button--choice fill, reused as the rule (ref §4) */
 
-  --rail: 288px;
+  /* ---- lines ------------------------------------------------------------ */
+  --line:         #d8d8d8;   /* the most-used border in their whole stylesheet (ref §2) */
+  --line-list:    #d7d7d7;   /* .elementList row rule; #myBooks.tableList th (ref §4) */
+  --line-toolbar: #dfdfdf;   /* .reviewControls bottom rule — the My Books toolbar (ref §4) */
+  --line-warm:    #d6d0c4;   /* .gr-button border (ref §4) */
+  --line-soft:    #e8e8e8;   /* soft divider (ref §2) */
+  --line-brown:   #ebe8d5;   /* .elementListBrown — a 3px rule, not 1px (ref §2, §7) */
+  --line-menu:    #cccccc;   /* .gr-button--medium__dropdownContainer border (ref §4) */
+
+  /* ---- shadows ----------------------------------------------------------
+     Two, both verbatim from their stylesheet. There is no elevation scale:
+     Goodreads' panels are flat, and a card that lifts off the page is not
+     their language. */
+  --shadow-cover: 2px 2px 2px #ccc;                 /* .bookCover (ref §4) */
+  --shadow-float: 0 3px 4px -3px rgba(0,0,0,.5);    /* .gr-button--medium__dropdownContainer (ref §4) */
+
+  /* ---- geometry --------------------------------------------------------- */
+  --radius:       3px;   /* every .gr-button, .searchBox__input, .searchBox__button (ref §4).
+                            CORRECTED from 4px. Controls are 3px. */
+  --radius-lg:    4px;   /* panels and cards. CORRECTED from 10px, which their stylesheet
+                            spends only on .discoveryBox and #newAccountBox — two promo
+                            boxes this app has no equivalent of. Their white bordered
+                            surfaces take 4px: .orderConfirmation__card{background:#fff;
+                            border:1px solid #d8d8d8;border-radius:4px} is the same object
+                            as .panel, and #box (the sign-in card){background:#FFFFFF;
+                            border-radius:4px} the same as the sign-in page's card. */
+
+  /* ---- type -------------------------------------------------------------
+     Their two stacks, verbatim, fallbacks included. */
+  --sans:  "Lato", "Helvetica Neue", Helvetica, Arial, sans-serif;  /* ref §1 */
+  --serif: "Merriweather", "Georgia", serif;                        /* ref §1 */
+  --mono:  ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; /* app-only; Goodreads
+                             has no monospace role. Used for ids, paths and timestamps. */
+
+  /* ---- metrics ---------------------------------------------------------- */
+  --header-h:   50px;    /* .siteHeader__contents height (ref §3) */
+  --header-max: 1220px;  /* .siteHeader__contents width at ≥1220px (ref §3) */
+  --content:    970px;   /* .mainContent — CORRECTED from 1400px (ref §3). It is the
+                            reference metric, not the shell cap any more: their 970px
+                            already holds their right-hand column, so .page takes
+                            --header-max instead (see .page). */
+  --gutter:     8px;     /* right column margin-left (ref §3) */
+  --rail:       300px;   /* .rightContainer width — CORRECTED from 288px (ref §3) */
 }
 
-* { box-sizing: border-box; }
+/* ===================================================================== reset */
+
+/* Their stylesheet does not reset box-sizing and then needs `box-sizing:
+   border-box` at eleven different declarations (.siteHeader__contents,
+   .searchBox, .gr-button--fullWidth, .gr-col-md-8 …). One global reset gets
+   the same arithmetic with one line. */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* ref §1 html,body{height:100%} — verbatim. */
+html, body { height: 100%; }
 
 body {
   margin: 0;
-  background: var(--cream);
-  color: var(--ink);
-  font: 14px/1.55 var(--sans);
+  background: var(--paper);       /* ref §1 body{background-color:#FFFFFF} — white, not cream */
+  color: var(--ink);              /* ref §1 body{color:#181818} */
+  /* Their generic element size is 12px and their modern default type is
+     .u-defaultType{font-size:14px;line-height:18px} (ref §1). 14/18 is the
+     body role here; the 12px is left to the dense rows and meta lines that
+     declare it themselves (the controls and data sections). */
+  font: 14px/18px var(--sans);
+  /* Carried from the existing file, and kept deliberately: Lato at 12–14px
+     renders visibly heavier on macOS without it, and Goodreads ships the same
+     treatment on its own body copy. */
   -webkit-font-smoothing: antialiased;
 }
 
+/* ================================================================ base type */
+
+/* ref §1 h1,h2,h3,h4,h5,h6{color:#382110;background-color:transparent} —
+   every heading in their system is brown ink. */
+h1, h2, h3, h4, h5, h6 {
+  color: var(--bar-ink);
+  background-color: transparent;
+}
+
+/* ref §1 .gr-h1 — the one heading size the base layer sets. .gr-h2 is
+   identical at 22px and .gr-h3/.gr-h4 are section headings that live inside
+   panels and rail cards, which the controls section owns; setting those sizes
+   globally would reach headings that section does not style. */
+h1 { font-size: 24px; font-weight: normal; line-height: 1.25; color: var(--ink-2); }
+
+/* ref §1 a{color:#00635d;text-decoration:none}. */
 a { color: var(--teal); text-decoration: none; }
-a:hover { text-decoration: underline; color: var(--teal-dark); }
-a:focus-visible, .nav a:focus-visible, .health-pill:focus-visible,
-.svc-row:focus-visible, [tabindex]:focus-visible {
-  outline: 2px solid var(--teal); outline-offset: 2px;
+
+/* ref §1 a:hover{text-decoration:underline} — and nothing else. Their colour
+   does *not* move on hover; the old file darkened it to --teal-dark, which is
+   .gr-button--teal:hover's fill and not a link state at all. */
+a:hover { text-decoration: underline; }
+
+/* ================================================================ focus ring
+   The one place in the project a ring is declared. Every focusable selector
+   the app has, in one list, so nothing below has to guess whether the ring is
+   its job — and no later rule declares a second :focus-visible for any of them.
+
+   :focus-visible, not :focus, so a mouse click on a row or a tab does not
+   leave a ring behind — Goodreads draws none either. */
+a:focus-visible, button:focus-visible, .btn:focus-visible, input:focus-visible,
+select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
+.tile:focus-visible, .svc:focus-visible, .svc-row:focus-visible, .health-pill:focus-visible,
+.book-row:focus-visible, .sidebar-version:focus-visible, .chip.svc-tag:focus-visible,
+.filters button:focus-visible, .wtr:focus-visible, .assist:focus-visible {
+  outline: 2px solid var(--teal);   /* their link accent — the only action colour */
+  outline-offset: 2px;
 }
 
-/* ============================================================== toolbar */
-/* 50px, light, brown text, darkening only on hover — .siteHeader__contents
-   and .siteHeader__topLevelLink. */
-.bar {
+/* These two are full-bleed rows inside a bordered panel: a ring drawn outside
+   the box would be clipped by the panel's own edge and disappear on the last
+   row, so it is drawn just inside instead. */
+.svc-row:focus-visible, .book-row:focus-visible { outline-offset: -2px; }
+
+/* ================================================================== helpers
+   Deliberately thin. Goodreads has no utility layer — its stylesheet is
+   composed of named components — so every helper here is app-only and the
+   comment on each says what it is standing in for. */
+
+.row {
+  display: flex; gap: 9px; align-items: center; flex-wrap: wrap;
+}
+/* The bare name `tight` belongs to .body.tight, declared with the panels below;
+   this is a different selector on the same idea, and .row.tight stays the
+   tighter gap only. */
+.row.tight { gap: 5px; }
+
+.grow { flex: 1; }
+
+.muted { color: var(--muted); }   /* .bookMeta / .keyValue label ink (ref §1, §2) */
+.faint { color: var(--faint); }   /* small / .gr-metaText ink (ref §1) */
+.ghost { color: var(--ghost); }   /* the darkened stand-in for .greyText #999999 */
+
+/* ref §1 small,.gr-metaText{font-size:12px}. Size only, no ink: the app
+   composes colour separately (.small.muted, .faint.small), and a colour here
+   would fight those. */
+.small { font-size: 12px; }
+
+/* Ref §1 has no monospace role, so there is no value to copy — a system stack
+   is used for the ids, paths and timestamps the app prints. */
+.mono { font-family: var(--mono); }
+
+/* --gold-ink, not --gold: #ffd767 is 1.47:1 on white and unreadable as text.
+   #B38B22 is the darkest gold Goodreads verifies, at 3.17:1 — which clears AA
+   for the 24px numeral it carries (.tile.gold .n, below, which re-declares
+   the colour there). Never put .gold on a label. */
+.gold { color: var(--gold-ink); }
+
+.mt { margin-top: 13px; }   /* app-only; the app's one vertical rhythm step */
+
+.nowrap { white-space: nowrap; }
+
+/* No Goodreads equivalent — they have no empty-state component. The inset is
+   derived from .promoBox{padding:32px 16px 20px} (ref §4) reduced one step,
+   the centred muted line from that panel's own centred text. */
+.empty { padding: 28px 15px; text-align: center; color: var(--muted); }
+
+/* Same source as .empty, for the numbered walkthrough on the sign-in handoff
+   page: .body gives the surrounding inset, this gives the list its own. */
+.steps { margin: 10px 0 0; padding-left: 20px; color: var(--muted); font-size: 13px; }
+.steps li { margin-bottom: 3px; }
+
+/* ================================================== the shell and the header
+ *
+ * The app shell grid and the whole header bar — .shell/.page/.col/.rail and
+ * everything inside <header class="bar">: wordmark, nav links, the header
+ * search box, the service-health pill and the account block. Nothing here
+ * styles a control that appears below the header (buttons, chips, panels and
+ * rows are the next two sections).
+ *
+ * Provenance: .siteHeader__* / .searchBox__* / .mainContent* (ref §3, §4) except
+ * the three controls Goodreads has no equivalent of — the health pill, the
+ * account block, the flex spacer — each derived from the nearest real component
+ * and saying so where it is declared.
+ *
+ * ONE HAZARD, deliberately left in place: the progress track is also a `.bar`
+ * (app.js renders `<div class="progress"><div class="bar">`), and it is the
+ * progress section further down, not this one, that resets the shell. Every
+ * `.bar` rule below therefore uses the bare class selector. `.bar` is (0,1,0)
+ * and `.progress .bar` is (0,2,0), so the reset wins on specificity and can
+ * undo position/top/z-index/border-bottom. Qualifying this selector at all —
+ * `header.bar`, `.shell .bar` — would outrank it and turn every progress bar
+ * into a sticky element, which is the bug this file's previous revision had by
+ * forgetting `position` in the reset. Leave it bare.
+ */
+
+/* ================================================================== shell */
+/* .mainContentContainer{width:100%;padding-bottom:25px} +
+   .mainContent{width:970px;margin:0 auto} + .mainContentFloat{padding-top:15px;
+   padding-left:5px;padding-right:5px}, collapsed into one grid element. Their
+   shell is two floats — .leftContainer 625px and .rightContainer 300px with an
+   8px gutter; the app's right column is exactly 300px (--rail) and the left
+   takes the remainder, so the same split can be a grid with no slack to model. */
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* The cap is the header's 1220px (.siteHeader__contents), NOT .mainContent's
+   970px. 970px is the trap: their .mainContent already contains their 300px
+   right-hand column, so holding the whole shell to it and then nesting the
+   app's own 300px rail inside gave the main column 650px and collapsed every
+   book row (§7). Content plus rail now fit the same 1220px the header locks to,
+   so the two edges align and neither column starves. The 5px side insets come
+   from .mainContentFloat, not from the 1220px block itself. No top offset for
+   the sticky bar — it stays in flow (below). */
+.page {
+  flex: 1; width: 100%; max-width: var(--header-max);
+  margin: 0 auto; padding: 15px 5px 25px;
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--rail);
+  gap: var(--gutter); align-items: start;
+}
+/* The version page and the sign-in page have no rail of their own. */
+.page.single { grid-template-columns: minmax(0, 1fr); }
+
+/* Grid items default to min-width:auto, so one unbroken token — a pipeline
+   path, a release hash in .mono, a long title — would push its track wider than
+   the track's share and burst the shell. .col and .rail hold the left/right
+   columns; the min-width:0 belongs on both. */
+.col { min-width: 0; }
+.rail { min-width: 0; }
+
+/* ================================================================ the bar */
+/* .siteHeader__topLine: a LIGHT bar (#faf8f6). #382110 is the colour of the
+   text on it, not of the bar — that inversion is the specific mistake this rule
+   exists to prevent, and their topLine draws no rule under itself either.
+   sticky+top:0 is derived: they use position:fixed with pointer-events:none and
+   no body offset; sticky gives the same pinned look without a 50px body pad.
+   z-index 70 is their own .siteHeader value (ref §3). */
+.bar, .siteHeader__topLine, .siteHeader__primaryNavSeparateLine {
   background: var(--bar);
-  border-bottom: 1px solid var(--line-warm);
-  position: sticky; top: 0; z-index: 40;
+  position: sticky; top: 0; z-index: 70;
+  border-bottom: 0;
+  font-family: var(--sans);   /* ref §3 .siteHeader{font-family:"Lato",…} — the
+                                 one place Lato is declared for the whole header,
+                                 so .nav a and .who inherit it. */
 }
-.bar-inner {
-  display: flex; align-items: stretch; gap: 0;
-  max-width: 1400px; margin: 0 auto; height: 50px;
-  padding: 0 15px;
-}
-.wordmark {
-  font-family: var(--serif); font-size: 21px; font-weight: 700;
-  color: var(--bar-ink); text-decoration: none;
-  display: flex; align-items: center; padding: 0 16px 0 0;
-  margin-right: 4px; white-space: nowrap;
-}
-.wordmark:hover { color: var(--bar-ink); text-decoration: none; }
-.wordmark span { color: var(--teal); }
 
+/* .siteHeader__contents: display:flex, height:50px, margin:0 auto, no padding —
+   the 15px left inset is the logo's own margin, not the container's. The width
+   step at the 1220px breakpoint lives in the breakpoints section at the bottom
+   of the file; the same cap is stated here too, so it holds whether or not that
+   block has loaded. Neither changes the other's result at any viewport: below
+   1220px both are 100%, at 1220px and above both are 1220px. */
+.bar-inner, .siteHeader__contents {
+  display: flex; align-items: stretch;
+  height: var(--header-h);
+  width: 100%; max-width: var(--header-max);
+  margin: 0 auto; padding: 0;
+}
+
+/* .siteHeader__logo, verbatim: a 140x50 box holding the 140x30 SVG centred,
+   margin:0 16px 0 15px. Their wordmark is an image, not type. The anchor's text
+   stays in the DOM as the accessible name and is pushed out of the box —
+   text-indent, not display:none, so the link keeps its name for screen readers
+   and for the moment before the SVG paints. flex:none keeps it from being
+   shrunk by the nav row. */
+.wordmark {
+  display: block; width: 140px; height: var(--header-h); flex: none;
+  margin: 0 16px 0 15px;
+  background: url("https://s.gr-assets.com/assets/layout/header/v2/goodreads_logo.svg") no-repeat center;
+  background-size: 140px 30px;
+  text-indent: -9999px; overflow: hidden;
+}
+/* the a:hover{} rule declared at the top of the file underlines every link; the
+   label is off-box here, so this is only so the hover state carries no
+   decoration at all. */
+.wordmark:hover { text-decoration: none; }
+/* The wordmark is a link home, so it presses like one. It cannot take a fill
+   step the way the nav links do: the logo is drawn as a background image
+   (140x30, centred in a 140x50 box) and #382110 artwork on --bar-hover's
+   #32362d would all but vanish. --sunk is the app's one verified wash light
+   enough to put anything on, and it reads as the logo's box going down under
+   the pointer rather than as a second, invented treatment. */
+.wordmark:active { background-color: var(--sunk); }
+/* Fallback ink for the hidden label: if the SVG never arrives the box stays
+   empty rather than showing teal "reads" on a brown "Good". */
+.wordmark span { color: var(--bar-ink); }
+
+/* .siteHeader__topLevelItem{display:inline-block} is a horizontal row of links.
+   As a flex row, align-items:stretch hands each link the full 50px bar height,
+   so its hover fill spans the bar edge to edge the way
+   .dropdown__trigger--personalNav's 50px block does. */
 .nav { display: flex; align-items: stretch; }
-.nav a {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 16px; line-height: 50px; padding: 0 18px;
+
+/* .siteHeader__topLevelLink, verbatim: 16px Lato, #382110, line-height:50px,
+   padding:0 30px (15px at >=1200px, in the breakpoints section at the bottom of
+   the file). At rest there is NO fill; the link is brown text on the light bar
+   and nothing else. */
+.nav a, .siteHeader__topLevelLink {
+  display: inline-block;
+  font-size: 16px; line-height: var(--header-h); padding: 0 30px;
   color: var(--bar-ink); text-decoration: none; white-space: nowrap;
 }
-.nav a:hover { background: var(--bar-hover); color: #fff; text-decoration: none; }
-.nav a.active { background: var(--bar-hover); color: #fff; font-weight: 700; }
-.nav a.active:hover { color: #fff; }
-
-.bar .spacer { flex: 1; }
-
-/* Search sits in the toolbar, where Goodreads keeps it. */
-.bar-search { display: flex; align-items: center; padding: 0 10px; }
-.bar-search input {
-  width: 300px; max-width: 34vw;
-  background: var(--paper); border: 1px solid var(--line-warm);
-  border-radius: var(--radius); padding: 6px 10px; font-size: 14px;
+/* Their two :hover rules, the later one winning on colour: #f2f2f2, not #FFFFFF.
+   #f2f2f2 is not tokenised because it appears exactly once in the whole of their
+   stylesheet and nowhere else in this app — a token no other rule can use is a
+   token that only hides the value. 11.03:1 on #32362d (§7). */
+.nav a:hover, .nav a.active,
+.siteHeader__topLevelLink:hover {
+  color: #f2f2f2; background-color: var(--bar-hover); text-decoration: none;
 }
-.bar-search input:focus { outline: none; border-color: var(--teal); }
+/* The press, and it is not the same fill as the hover — the audit's complaint
+   about this row was that :active and :hover were one rule, so clicking a
+   section looked identical to resting the pointer on it. One step below
+   .siteHeader__topLevelLink:hover is --press-dark, the quiet button's :active
+   (ref §4): it is the palette's darkest warm, and #f2f2f2 on it is 15.6:1.
+   Their own nav has no :active of its own, so this is the app's, built out of
+   the two values their bar already uses rather than a new one. */
+.nav a:active, .siteHeader__topLevelLink:active {
+  color: #f2f2f2; background-color: var(--press-dark); text-decoration: none;
+}
+/* The current section holds the same dark fill as hover and nothing else —
+   .siteHeader__topLevelLink is weight normal at 16px, and
+   .dropdown__trigger--personalNavActive marks the current item with its fill
+   too, not with a weight change. The bold this rule used to add was neither
+   theirs nor needed: the fill already says which section you are in, and a bold
+   link is a second, louder signal on a bar where nothing else is bold. */
 
+/* ============================================================= the search */
+/* .searchBox--navbar{margin-top:9px;margin-right:8px;flex:1} + .searchBox
+   {position:relative}. align-self:flex-start stops .bar-inner's
+   align-items:stretch from pulling the 32px input down the full 50px bar.
+   The width is carried on this container, not on the input, because
+   .searchBox__input--library sizes the field's box: 155px here, then the two
+   steps up in the breakpoints section at the bottom of the file (ref §4).
+   flex:0 1 auto and not `flex:1` on purpose — a flex-basis of 0 lets the box
+   grow, so the ceiling would be the only thing setting its size and the caret
+   line would never shorten at the widths where goodreads.com shortens it.
+   The max-width restates the 270px ceiling so the base is right on its own;
+   the 155px width is what the 1040px step has to override, which is why that
+   step declares a width and not only a max-width (see the note there). */
+.bar-search {
+  position: relative;
+  flex: 0 1 auto; width: 155px; max-width: 270px;
+  margin: 9px 8px 0 0; align-self: flex-start;
+}
+
+/* .searchBox__input--navbar/--library: 32px tall, 1px #D8D8D8 (their most-used
+   border, --line), 3px radius (--radius), padding 4px 26px 4px 8px — the 26px
+   right inset is the magnifier's slot, not spacing, and is why the padding is
+   the declaration most worth defending here.
+   Specificity: the input rule further down is also (0,1,1) and comes later in
+   the file, so it would win on source order, taking that 26px slot and resetting
+   the label to its 13px. The extra .bar step exists only to keep the slot; it is
+   not a design choice. font-family is declared because an <input> does not
+   inherit one. */
+.bar .bar-search input {
+  width: 100%; height: 32px;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 4px 26px 4px 8px;
+  font-family: var(--sans); font-size: 14px; color: var(--ink);
+  background: var(--paper);
+}
+/* .searchBox__input has no :focus rule in their stylesheet; the teal border is
+   the app's affordance, on the same accent a link uses. outline:none is scoped
+   to :not(:focus-visible) so it cannot outrank the 2px ring declared at the top
+   of the file — this selector is (0,3,1) against input:focus-visible's (0,1,1),
+   so an unguarded outline:none would silently remove the only focus cue on the
+   header's only text field, which is a WCAG 2.4.7 regression, not a style
+   preference. */
+.bar-search input:focus { border-color: var(--teal); }
+.bar-search input:focus:not(:focus-visible) { outline: none; }
+/* --ghost #757575, this app's deliberate darkening of their .greyText #999999
+   (2.81:1 on white — unusable at 14px); #757575 holds 4.61:1 (§7). */
+.bar-search input::placeholder { color: var(--ghost); }
+
+/* .searchBox__icon--magnifyingGlass, verbatim: 18x19 at right:4px/top:6.5px,
+   with their own filter:brightness(0) turning the grey glyph black. A
+   pseudo-element rather than markup because app.js and the HTML are frozen for
+   this pass, and the filter cannot be applied to a background-image sitting on
+   the input itself. It paints over the input's right edge, so pointer-events
+   must stay off or it would swallow clicks on the last 18px of the field. */
+.bar-search::after {
+  content: ""; position: absolute; right: 4px; top: 6.5px;
+  width: 18px; height: 19px;
+  background: url("https://s.gr-assets.com/assets/layout/header/icn_nav_search.svg") no-repeat;
+  filter: brightness(0);
+  pointer-events: none;
+}
+
+/* .searchBox__button, verbatim from ref §4 — the button that sits beside a
+   search field on goodreads.com. The app renders none today, so this is the
+   slot one would take.
+   RESOLVED SEAM: the rule is in the reference, but the class was left out of
+   both sections' lists of named selectors, and the stylesheet this file replaces
+   does style it — so the merge as written would have dropped a name app.js is
+   allowed to emit. It stays with the search box it belongs to, re-expressed
+   through the tokens: --radius for the 3px, --sans for the label face, --cream
+   for the fill, --cream-3 for the hover, --line-warm for the border. The
+   disabled trio has no token (the token block names no disabled colours) and
+   keeps the reference's numbers, with its #cccccc label darkened to #6f6f6f:
+   4.53:1 on #F3F3F3, where #cccccc measures 1.23:1. */
+.searchBox__button {
+  border-radius: var(--radius); border: 1px solid var(--line-warm);
+  font-family: var(--sans); font-size: 14px;
+  appearance: none; -webkit-appearance: none;
+  cursor: pointer; display: inline-block; text-decoration: none;
+  color: var(--ink-2); background-color: var(--cream); line-height: 1; padding: 8px 12px;
+}
+.searchBox__button:hover { color: var(--ink-2); background-color: var(--cream-3); text-decoration: none; }
+.searchBox__button:active { background-color: var(--line-warm); }
+.searchBox__button:disabled { background-color: #F3F3F3; color: #6f6f6f; border-color: #DDDDDD; }
+
+/* ============================================================ right of nav */
+/* The app's own: Goodreads floats and orders its header contents, so it has no
+   spacer element. flex:1 here is what pushes the search box, the pill and the
+   account block to the right edge. */
+.spacer { flex: 1; }
+
+/* No Goodreads equivalent — the always-visible answer to "is anything broken
+   right now", one click from the page that explains and logs it. Geometry
+   derived from .gr-button geometry at .gr-button--small's inset (3px radius,
+   1px border, Lato, line-height:1), the nearest real control: a header chip is a
+   small target beside full-height nav links, so it sits on the bar's baseline
+   rather than filling it. The two problem states reuse the .flashNotification
+   surfaces verbatim, so a broken service reads in the header exactly as it does
+   in the banner below it. */
+.health-pill {
+  display: inline-flex; align-items: center; gap: 6px; align-self: center;
+  background: var(--cream); border: 1px solid var(--line-warm); border-radius: var(--radius);
+  padding: 4px 12px; font-size: 12px; line-height: 1; color: var(--ink-2);
+  text-decoration: none; white-space: nowrap;
+}
+/* .flashNotification.error — 11.74:1 (§7). */
+.health-pill.bad  { background: var(--alert-err-bg); border-color: var(--alert-err-line); color: var(--err); }
+/* .gr-errorMessage / .gr-button--choice — 5.95:1 (§7). */
+.health-pill.warn { background: var(--alert-warn-bg); border-color: var(--alert-warn-line); color: var(--warn); }
+/* The two pointer states, declared after the two alert surfaces above on
+   purpose. `.health-pill.bad` and `.health-pill:hover` are both (0,2,0), so at
+   equal weight the later rule wins — and the alert surface used to come last,
+   which made the pill the header shows when something is *wrong* the one pill
+   that did not respond to the pointer at all. The alert is not lost by this:
+   the ink and the border stay red on hover, and only the fill moves, so the
+   pill still says "services need attention" while it also says "you are
+   pointing at me".
+   --cream-3 is .gr-button:hover; --line-warm is .gr-button:active, the design
+   system's pressed fill, and the same step every cream control in the app goes
+   down (--cream → --cream-3 → --line-warm). */
+.health-pill:hover { background: var(--cream-3); color: var(--ink-2); text-decoration: none; }
+.health-pill:active { background: var(--line-warm); color: var(--ink-2); text-decoration: none; }
+
+/* .siteHeader__personal{margin:0 8px 0 0} plus the app's gap; the block holds
+   #headline and the sign-out button, both vertically centred. */
 .bar-account { display: flex; align-items: center; gap: 8px; padding-left: 8px; }
-.bar-account .who {
-  font-size: 12px; color: var(--faint); text-align: right; line-height: 1.3;
+
+/* #headline: "Goodreads / <session age>", two right-aligned lines. --muted
+   #666666 and NOT --faint #767676: faint measures 4.29:1 on the #faf8f6 bar and
+   fails §7, while #666666 holds 5.42:1. The bar is the one surface where the
+   difference between those two greys bites. */
+.bar-account .who, .who {
+  font-size: 12px; line-height: 1.3; color: var(--muted); text-align: right;
 }
+/* The session age (or "not signed in") is the part that matters, so it takes the
+   header's own brown ink: #382110 on #faf8f6 is 14.23:1 (§7). */
 .bar-account .who b { color: var(--bar-ink); }
 
-/* The one thing Goodreads has no equivalent of: a permanent read on whether
-   the services this app drives are actually working. */
-.health-pill {
-  display: flex; align-items: center; gap: 6px;
-  border: 1px solid var(--line-warm); background: var(--paper);
-  border-radius: 999px; padding: 4px 11px; font-size: 12.5px;
-  color: var(--bar-ink); cursor: pointer; white-space: nowrap;
-}
-.health-pill:hover { border-color: var(--teal); text-decoration: none; }
-.health-pill.bad { border-color: #e3b7b3; background: var(--err-bg); color: #7d2620; }
-.health-pill.warn { border-color: #e6d3a3; background: var(--warn-bg); color: #7a5200; }
+/* ============================================================ the controls
+ *
+ * The controls and the surfaces they sit on — buttons, form fields, status
+ * chips, panels and tiles, the alerts and toasts, the shelf tab strip and its
+ * toolbar, progress, the event log, the status dots, and the sign-in page's own
+ * set.
+ *
+ * Every value here is the reference's, cited inline as "ref §N" for a
+ * declaration read out of goodreads.com's production stylesheet. Where the app
+ * needs a component goodreads.com has no equivalent of, the rule says *derived*
+ * and names the nearest real component it was measured from — a self-hosted
+ * tool still has to draw its own service chips and pipeline rows.
+ *
+ * Two things this section deliberately does NOT do:
+ *   - no @media block (all five breakpoints live in the responsive section at
+ *     the bottom of the file);
+ *   - no :focus-visible rule (the focus ring is declared once, at the top, for
+ *     the whole app). Input focus here changes the border colour only, so the
+ *     ring survives instead of being cancelled by an `outline:none` at equal
+ *     specificity.
+ *
+ * `#ffffff` is the one literal left in declarations besides the surfaces noted
+ * individually below. The token block has no name for it: --paper is its
+ * *surface* role, and no token means "the white foreground on a dark fill". It
+ * appears only where the reference states it verbatim — the quiet button's
+ * hovered label, the auth chip label, and the unshelved Want to Read label.
+ */
 
-/* =============================================================== layout */
-.shell { min-height: 100vh; display: flex; flex-direction: column; }
-.page {
-  flex: 1; width: 100%; max-width: 1400px; margin: 0 auto;
-  padding: 18px 15px 40px;
-  display: grid; grid-template-columns: minmax(0, 1fr) var(--rail);
-  gap: 18px; align-items: start;
+/* ============================================================== buttons */
+/* ref §4 .gr-button / .gr-button--small / --quiet. The app maps `button` and
+   `.btn` to .gr-button — which IS Goodreads' primary button — `.primary` to the
+   same thing, `.ghost` to --quiet, `.tiny` to --small, `.link` to .gr-hyperlink. */
+button, .btn {
+  border-radius: var(--radius);            /* 3px, corrected from 4px — ref §4 */
+  border: 1px solid var(--line-warm);      /* #d6d0c4 */
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: normal;
+  appearance: none;
+  -webkit-appearance: none;                /* ref lists four prefixes; these two are the live ones */
+  cursor: pointer;
+  display: inline-block;
+  text-decoration: none;
+  color: var(--ink-2);                     /* #333333 — 11.20:1 on the fill below */
+  background-color: var(--cream);          /* #f4f1ea — the correction that matters: this is the
+                                              button fill, never the page */
+  line-height: 1;
+  padding: 8px 12px;
 }
-.page.single { grid-template-columns: minmax(0, 1fr); }
-.col { min-width: 0; }
+button:hover, .btn:hover {
+  color: var(--ink-2);
+  background-color: var(--cream-3);        /* #ede6d6 — .gr-button:hover */
+  text-decoration: none;                   /* an underlined button label is not their look */
+}
+button:active, .btn:active { background-color: var(--line-warm); }  /* #D6D0C4, ref §4 */
 
-/* =============================================================== banner */
-.banner {
-  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-  padding: 11px 15px; border-radius: var(--radius); margin-bottom: 14px;
-  border: 1px solid; font-size: 13.5px;
+/* .primary is their primary button, and their primary button is the CREAM one.
+   .gr-button's own fill is #F4F1EA with a #D6D0C4 border and a #333333 label —
+   there is no second, more prominent fill in the system, and #00635D is
+   .gr-button--teal, a colour *variant* that sits beside --dark, --quiet and
+   --red rather than above them. This rule used to paint .primary with it, which
+   made every primary action on all eight views read as the wrong system. It is
+   written out rather than inherited from `button` above so the intent is on the
+   page: this is the reference's primary, and it is the same cream.
+   The focus ring declared at the top of the file is a 2px --teal outline, which
+   holds 6.33:1 against this fill — past the 3:1 a non-text indicator needs — so
+   it still reads here, and the white-on-teal label it was sized for is gone. */
+button.primary, .btn.primary {
+  background-color: var(--cream);          /* #f4f1ea — .gr-button's fill */
+  border: 1px solid var(--line-warm);      /* #d6d0c4 */
+  color: var(--ink-2);                     /* #333333 — 11.20:1 on the cream above */
+  font-weight: normal;                     /* the old 600 is theirs nowhere; .gr-button is weightless */
 }
-.banner.err  { background: var(--err-bg);  border-color: #e3b7b3; color: #7d2620; }
-.banner.warn { background: var(--warn-bg); border-color: #e6d3a3; color: #7a5200; }
-.banner.ok   { background: var(--ok-bg);   border-color: #b8dcc5; color: #1a5c36; }
-.banner b { color: var(--ink); }
-.banner .grow { flex: 1; }
+/* ref §4 .gr-button:hover / :active — the same two fills the base button uses.
+   Split apart because they are no longer one value. */
+button.primary:hover, .btn.primary:hover {
+  background-color: var(--cream-3);        /* #ede6d6 */
+  border-color: var(--line-warm);
+  color: var(--ink-2);
+}
+button.primary:active, .btn.primary:active {
+  background-color: var(--line-warm);      /* #D6D0C4 */
+  border-color: var(--line-warm);
+  color: var(--ink-2);
+}
 
-/* ================================================================ cards */
-.panel {
-  background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
+/* ref §4 .gr-button:disabled. Their ink #cccccc on #F3F3F3 measures 1.23:1 and
+   is refused per the brief's rule 5; #6f6f6f holds 4.53:1 on the same fill and
+   is the only number changed. Neither fill nor border is
+   tokenised — the token block has no disabled trio.
+
+   Declared last of the button states, and naming .primary in the selector, so a
+   modifier cannot repaint a disabled button: button.primary is (0,1,1) and ties
+   with button:disabled, and button.primary:hover is (0,2,1), so the pairing has
+   to be spelled out at that weight AND come after it. This is not hypothetical —
+   app.js disables a .primary button (testService() holds its "Test now" button
+   down for the length of the request). */
+button:disabled, button[disabled], .btn[aria-disabled="true"],
+button.primary:disabled, .btn.primary[aria-disabled="true"] {
+  background-color: #F3F3F3;
+  border-color: #DDDDDD;
+  color: #6f6f6f;
+  cursor: default;
 }
-.panel > h2 {
-  margin: 0; padding: 10px 15px; font-size: 12px; font-weight: 700;
-  letter-spacing: .5px; text-transform: uppercase; color: var(--brown-3);
-  border-bottom: 1px solid var(--line); background: var(--cream-2);
+
+/* ref §4 .gr-button--quiet — the outline button. #1A0F07 on :active is their
+   value and is not tokenised. */
+button.ghost, .btn.ghost {
+  background-color: transparent;
+  border: 1px solid var(--bar-ink);        /* #382110 */
+  color: var(--bar-ink);
+  font-weight: normal;
+}
+button.ghost:hover, .btn.ghost:hover {
+  background-color: var(--bar-ink);
+  border-color: var(--bar-ink);
+  color: #ffffff;
+}
+button.ghost:active, .btn.ghost:active {
+  background-color: var(--press-dark);     /* #1a0f07, ref §4 */
+  border-color: var(--press-dark);
+  color: #ffffff;
+}
+/* A DISABLED ghost button, which button:disabled above cannot reach. That rule
+   is (0,1,1) and button.ghost is (0,1,1) too, declared later, so a disabled
+   ghost kept its transparent fill and its #382110 ink and looked fully live;
+   button.ghost:hover (0,2,1) outranks it outright as well. This is the button
+   the user pressed: the rail's "Re-check" is .tiny.ghost, and app.js holds it
+   down for the length of the request — over the pointer that is still resting
+   on it, which is exactly when it used to repaint itself dark. Declared after
+   both ghost pointer states, at their weight, so it wins the tie.
+   #F3F3F3 / #DDDDDD / #6f6f6f are button:disabled's, unchanged; the app has no
+   disabled trio in the token block, for the reason given there. */
+button.ghost:disabled, button.ghost[disabled], .btn.ghost[aria-disabled="true"] {
+  background-color: #F3F3F3;
+  border-color: #DDDDDD;
+  color: #6f6f6f;
+  cursor: default;
+}
+
+button.tiny, .btn.tiny { font-size: 11px; padding: 4px 12px; }   /* ref §4 .gr-button--small */
+
+/* ref §4 .gr-hyperlink — a button that reads as a link. Colour is the link
+   accent and does not change on hover; only the underline appears. */
+button.link, .btn.link {
+  background: none; border: 0; padding: 0; color: var(--teal); font-size: inherit;
+}
+button.link:hover, .btn.link:hover { color: var(--teal); text-decoration: underline; }
+
+/* Retained verbatim from ref §4. The app emits no .gr-button base (that name is
+   not in the frozen class set), so the base declarations are inlined here;
+   the modifier's three rules are theirs exactly. */
+.gr-button--choice {
+  border-radius: var(--radius); border: none; font-family: var(--sans); font-size: 14px;
+  font-weight: bold; appearance: none; -webkit-appearance: none; cursor: pointer;
+  display: inline-block; text-decoration: none; color: var(--ink-2);
+  background-color: var(--gold); line-height: 1; padding: 8px 12px;
+}
+.gr-button--choice:hover { background-color: var(--gold); border: none; }
+.gr-button--choice:active { border: none; }
+
+/* ======================================================= want to read */
+/* ref §4 .wantToReadButton (+ __left, __leftUnshelved, __leftShelved).
+   Unshelved is their darker green — the same component's to-read check icon
+   (#29722E, --ok), not the #409D69 fill: white on #409D69 is 3.36:1 and cannot
+   carry a 14px label, while white on #29722E holds 5.93:1. One step down in the
+   same family, and the reason is recorded rather than the number quietly
+   changed. */
+.wtr {
+  display: inline-block; vertical-align: middle; max-width: 180px; min-width: 110px;
+  height: 30px; padding: 0 8px; border-radius: var(--radius); border: 1px solid transparent;
+  font-family: var(--sans); font-size: 14px; font-weight: normal; line-height: 28px;
+  text-align: center; cursor: pointer; text-decoration: none;
+  background: var(--ok); color: #ffffff; border-color: var(--ok);
+}
+/* derived: their hover (#3d9363) is LIGHTER and drops the label to 3.78:1, so
+   hover darkens by 10% instead of lightening. */
+.wtr:hover { filter: brightness(.9); }
+/* The press is one more step down the same axis rather than a second
+   mechanism — the button already darkens with filter, so pressing darkens
+   further. White on the pressed #29722E is 8.3:1 (--ok darkened 20%). The
+   component is not emitted by app.js today; the row is kept so the retained
+   class is complete rather than the one control in the file with no press. */
+.wtr:active { filter: brightness(.8); }
+/* SHELVED — verbatim .wantToReadButton__leftShelved. #F2F2F2 is not tokenised;
+   the token block has no shelved-grey because Goodreads uses it nowhere else. */
+.wtr.shelved {
+  background: #F2F2F2; color: var(--value); border-color: var(--line-warm);
+  font-family: var(--sans);
+}
+
+/* ================================================================= fields */
+/* ref §4 .searchBox__input geometry (1px #D8D8D8, 3px radius) at the app's own
+   13px control size; the previous padding of 6px 9px is corrected to 6px 8px and
+   its radius of 4px to 3px.
+   width:100% is load-bearing: the two inline checkboxes in settings and the book
+   page cancel it with style="width:auto". */
+input[type="text"], input[type="password"], input[type="search"], select, textarea {
+  font-family: var(--sans); font-size: 13px; color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  width: 100%;
+}
+/* Border only. An `outline: none` here would sit at the same specificity as
+   the input:focus-visible ring; loading later, it would erase that ring. */
+input:focus, select:focus, textarea:focus { border-color: var(--teal); }
+input::placeholder, textarea::placeholder { color: var(--ghost); }
+
+.field, label.field { display: block; margin-bottom: 11px; }
+
+/* Two labels, two roles, one class name. The sign-in page's label is a bare
+   `.lbl` on its own design — 13px in --ink-2, as its inline block has it. The
+   app's settings form labels through `label.field`, and follows the ref's
+   form-label rule instead: 12px, the muted ink that reads as a label rather
+   than as copy (ref §1 "Form labels"). The compound is one class heavier, so
+   it wins where both match. */
+.lbl { display: block; font-size: 13px; line-height: 1.4; color: var(--ink-2); margin-bottom: 5px; }
+label.field .lbl { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.hint, label.field .hint {
+  display: block; font-size: 11.5px; line-height: 1.45; color: var(--ghost); margin-top: 3px;
+}
+
+/* ================================================================ chips */
+/* No Goodreads equivalent, so derived: .gr-button geometry (3px radius, 1px
+   border, Lato, line-height:1) at .gr-button--small's 11px, with the 4px/12px
+   inset halved — a chip is a label, not a target, and four in a row would
+   otherwise eat the pipeline row they sit in. */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: var(--radius); border: 1px solid var(--line-warm);
+  font-family: var(--sans); font-size: 11px; line-height: 1.45; font-weight: normal;
+  background: var(--cream); color: var(--ink-2); white-space: nowrap; vertical-align: middle;
+}
+/* The loud states are Goodreads' own alert surfaces, not invented tints:
+   .flashNotification.confirm, .flashNotification.error, .gr-errorMessage.
+   Ratios 6.55, 11.74, 5.95. .done shares the confirm surface —
+   bookState() reports it for a book with nothing left to run, which is
+   confirmation, not a warning. */
+.chip.ok, .chip.done { background: var(--alert-ok-bg); border-color: var(--alert-ok-line); color: var(--warn); }
+.chip.failed         { background: var(--alert-err-bg); border-color: var(--alert-err-line); color: var(--err); }
+.chip.blocked        { background: var(--alert-warn-bg); border-color: var(--alert-warn-line); color: var(--warn); }
+/* "In flight" is the link teal — Goodreads has no informational blue, so the app
+   does not invent one (--info). .working is the same state under
+   the name bookState() returns; it is carried here so a "working" book is not
+   the only chip drawn without a state. .testing is the same surface again, for
+   the window a service re-check is open in: one hollow teal box, whether the
+   work behind it is a book stage or a health probe. */
+.chip.running, .chip.working, .chip.testing { background: transparent; border-color: var(--teal); color: var(--teal); }
+/* Not-yet-run and deliberately-skipped states. The old file used opacity here,
+   which drags 4.5:1 down to about 3.4:1; a real grey ink holds the ratio. */
+.chip.pending              { background: transparent; border-color: var(--line); color: var(--muted); }
+.chip.skipped              { background: transparent; border-color: var(--line); color: var(--faint); }
+.chip.nodata               { background: transparent; border-color: var(--line); color: var(--faint); }
+/* White on #4e1919 is 14.22:1 — the credentials chip has to survive being read
+   at a glance. */
+.chip.auth { background: var(--err); border-color: var(--err); color: #ffffff; font-weight: 700; }
+/* "A format does not exist" is a fact about the world, not a fault: the brown
+   rule, the muted ink, no red anywhere. */
+.chip.partial, .chip.unavailable {
+  background: transparent; border-color: var(--line-brown); color: var(--muted);
+}
+/* Which service a failure belongs to. Always a link — one click gets you to
+   that service's own page. #382110 on #ebe8d5 is 12.23:1, and the teal on hover
+   is 5.79:1. */
+.chip.svc-tag {
+  background: var(--cream-2); border-color: var(--line-warm); color: var(--brown);
+  font-weight: 600; text-decoration: none;
+}
+a.chip.svc-tag:hover { border-color: var(--teal); color: var(--teal); text-decoration: none; }
+/* The chip is a link, so it presses: the pointer states on a chip have to be
+   its own, because a.chip.svc-tag.hover does not give the base `button:active`
+   this file hands everything else. --line-warm is .gr-button:active and the one
+   pressed fill the app uses; the ink goes back to the chip's own --brown
+   (#382110 on #d6d0c4 is 11.9:1) rather than holding the hover's teal, so the
+   press is a step past the hover and not a second hover. */
+a.chip.svc-tag:active {
+  background: var(--line-warm); border-color: var(--line-warm);
+  color: var(--brown); text-decoration: none;
+}
+
+/* =============================================================== panels */
+/* ref §4 .orderConfirmation__card — the verified white panel: white, 1px
+   #D8D8D8, 4px. That 4px is --radius-lg; the 10px this rule used to carry is
+   .discoveryBox/#newAccountBox only, and a promo box is not a panel.
+   .rail-card is in this selector on purpose. A rail box IS a panel — same
+   white, same 1px #d8d8d8, same 4px, same 14px stack — and the two were
+   written out twice (here and in the right-rail section) until the rail's copy
+   drifted: it was the only thing in the column that had to be read side by
+   side with the main column and still not match it. One rule, so it cannot
+   drift again. Its heading is <h3> only because the rail's own document order
+   puts it under the page h1/h2s, not because it is a different component. */
+.panel, .rail-card {
+  background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  margin-bottom: 14px; overflow: hidden;   /* clips the square h2 into the 4px corners */
+}
+/* ref §4 h2.brownBackground a / .authorQuotesBigBoxTitle: 12px bold uppercase
+   #382110 on the #EBE8D5 .box h2 fill, 24px tall. The old --brown-3 and its .5px
+   letter-spacing are gone — #75482a was never a Goodreads value. */
+.panel > h2, .rail-card > h3 {
+  margin: 0; padding: 2px 8px; min-height: 24px; line-height: 20px;
+  background: var(--cream-2); border-bottom: 1px solid var(--line);
+  color: var(--bar-ink); font-family: var(--sans); font-size: 12px; font-weight: bold;
+  text-transform: uppercase; letter-spacing: 0;
   display: flex; align-items: center; gap: 10px;
 }
-.panel > h2 .grow { flex: 1; }
-.panel .body { padding: 14px 15px; }
-.panel .body.tight { padding: 8px 15px; }
-.panel .body.flush { padding: 0; }
+/* The panel heading carries the app's event count as `.faint small`. #767676 on
+   #ebe8d5 measures 3.69:1, which fails at 12px; --muted holds 4.66:1 on the same
+   fill. Same move the tab strip makes for the count inside a tab. */
+.panel > h2 .faint, .rail-card > h3 .faint { color: var(--muted); }
+
+/* .panel .body and .rail-card .body are deliberately one rule, not two: the
+   rail body takes the panel's inset unchanged, and a body that needs less asks
+   for .body.tight (also here). The data section owns the rail card, not its
+   padding. */
+.body { padding: 14px 15px; }
+.body.tight { padding: 8px 15px; }
+.body.flush { padding: 0; }   /* .body.flush.log — the log rows carry their own inset */
 
 /* ================================================================ tiles */
+/* Button-shaped tiles on a .orderConfirmation__card panel: same white, same 4px. */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(132px, 1fr)); gap: 9px; margin-bottom: 14px; }
 .tile {
-  background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 12px 14px; text-align: left;
+  background: var(--paper);              /* unsets the global button cream */
+  border: 1px solid var(--line);         /* unsets #d6d0c4 */
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  text-align: left;
   font: inherit;
-  transition: border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+  cursor: default;                       /* it is a <button>; only .clickable is a target */
+  color: var(--ink-2);
 }
-.tile .n { font-family: var(--serif); font-size: 25px; line-height: 1.1; color: var(--brown); }
-.tile .k { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+.tile.clickable { cursor: pointer; }
+/* No transform and no shadow: Goodreads has no elevation scale, and a card that
+   lifts off the page is not their language. */
+.tile.clickable:hover { border-color: var(--bar-hover); }
+/* The tile is a <button>, so its pressed fill comes from `button:active` above
+   (--line-warm) and its 1px depression from the reduced-motion block at the
+   bottom. What it needs here is the hover border to survive being pressed:
+   .tile.clickable:hover is (0,3,0) and would repaint the border back to
+   --bar-hover over the darker fill. */
+.tile.clickable:active { border-color: var(--bar-hover); }
+/* derived: .dropdown__trigger--personalNavActive's #32362d fill as an inset ring,
+   which is .selectedTab's 2px-black underline idea carried to a square tile. */
+.tile.on { border-color: var(--bar-hover); box-shadow: inset 0 0 0 1px var(--bar-hover); }
+/* ref §1 .gr-h1 — 24px, weight normal, line-height 1.25, #333333. The serif
+   numeral is gone; it was never a Goodreads figure. */
+.tile .n {
+  font-family: var(--sans); font-size: 24px; font-weight: normal; line-height: 1.25;
+  color: var(--ink-2);
+}
+/* ref §3 .siteHeader__heading — the 12px bold 16px-line uppercase brown. */
+.tile .k {
+  font-size: 12px; font-weight: bold; line-height: 16px; text-transform: uppercase;
+  color: var(--bar-ink); margin-top: 2px;
+}
+/* The numeral is the only thing that changes colour per state; the label stays
+   brown so the tile still reads as a tile. #ffd767 as text is 1.38:1 and is
+   refused — .gold re-declares to the darkest verified gold, #B38B22, which holds
+   3.17:1 and clears AA for a 24px numeral. */
 .tile.ok .n   { color: var(--ok); }
 .tile.warn .n { color: var(--warn); }
 .tile.err .n  { color: var(--err); }
-.tile.clickable { cursor: pointer; }
-.tile.clickable:hover { border-color: var(--teal); box-shadow: var(--shadow-sm); transform: translateY(-1px); }
-.tile.on { border-color: var(--teal); box-shadow: inset 0 0 0 1px var(--teal); }
+.tile.gold .n { color: var(--gold-ink); }
 
-/* ============================================================= book list */
-/* .elementList: a rule between rows and nothing else. The cover does the
-   work; the row is not a card. */
-.book-list { display: flex; flex-direction: column; }
-.book-row {
-  display: grid; grid-template-columns: 52px minmax(0, 1fr) auto;
-  gap: 13px; padding: 12px 15px;
-  border-bottom: 1px solid var(--line-list);
-  cursor: pointer;
-  transition: background-color .15s ease;
+/* =============================================================== alerts */
+/* The two real .flashNotification surfaces plus the gold .gr-errorMessage box.
+   Their old app-invented tints are gone; every pair below is in the ledger. */
+.banner {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 15px; border: 1px solid; border-radius: var(--radius);
+  margin-bottom: 14px; font-size: 13px; line-height: 18px;
 }
-.book-row:last-child { border-bottom: none; }
-.book-row:hover { background: #fbfaf8; }
-.book-row:focus-visible { outline: 2px solid var(--teal); outline-offset: -2px; }
+.banner.err  { background: var(--alert-err-bg);  border-color: var(--alert-err-line);  color: var(--err); }
+.banner.ok   { background: var(--alert-ok-bg);   border-color: var(--alert-ok-line);   color: var(--warn); }
+.banner.warn { background: var(--alert-warn-bg); border-color: var(--alert-warn-line); color: var(--warn); }
+/* Bold text keeps the alert's own ink instead of reverting to body ink; #181818
+   would clear 15:1 on any of the three, but the banner should stay one colour. */
+.banner b { color: inherit; }
 
-.book-row .cover {
-  width: 52px; height: 78px; border-radius: 2px; object-fit: cover;
-  background: var(--cream-2); box-shadow: var(--shadow-sm);
+/* =============================================================== toasts */
+/* ref §4 .gr-button--medium__dropdownContainer — the verified floating panel:
+   white, 1px #cccccc, 3px, and their one floating shadow. */
+#toasts { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
+.toast {
+  background: var(--paper); border: 1px solid var(--line-menu); border-radius: var(--radius);
+  box-shadow: var(--shadow-float); padding: 10px 13px; font-size: 13px;
 }
-.book-row .cover.blank { display: grid; place-items: center; color: var(--ghost); font-size: 18px; }
+/* derived: the edge is the ink of the alert surface the toast is reporting, so a
+   toast and a banner about the same thing share a colour. The old --ok green
+   (#1e7b45) was the app's own and is gone; the confirm ink is the warn
+   brown. */
+.toast.ok  { border-left: 3px solid var(--warn); }
+.toast.err { border-left: 3px solid var(--err); }
+.toast .tt { font-weight: 700; margin-bottom: 2px; }
+.toast .tb { color: var(--ink-2); font-size: 12.5px; word-break: break-word; }
 
-/* Merriweather bold, the way .bookTitle is. */
-.book-row .title {
-  font-family: var(--serif); font-weight: 700; font-size: 15px;
-  line-height: 1.3; color: var(--ink-2);
+/* ========================================================= tabs + toolbar */
+/* ref §4 .reviewControls — the My Books toolbar: one #DFDFDF rule under it,
+   8px of air, 12px before the table. */
+.toolbar {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line-toolbar); padding-bottom: 8px; margin-bottom: 12px;
 }
-.book-row a.title:hover { color: var(--teal); }
-/* .authorName is serif too — not the sans used for everything else. */
-.book-row .byline {
-  font-family: var(--serif); font-size: 13px; color: var(--ink-2); margin-top: 1px;
-}
-.book-row .byline a { color: var(--teal); }
-.book-row .meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
-.book-row .side { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
-
-/* The line that matters: what is blocking this book, and who is to blame. */
-.blocker { margin-top: 6px; font-size: 12.5px; }
-.blocker .msg { color: var(--err); word-break: break-word; }
-.blocker .msg.soft { color: var(--warn); }
-.blocker .msg.quiet { color: var(--muted); }
-
-.pipeline { display: flex; gap: 3px; flex-wrap: wrap; }
-
-/* =============================================================== book page */
-.bookpage { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; }
-.bookpage .cover-lg {
-  width: 190px; border-radius: 3px; background: var(--cream-2);
-  box-shadow: var(--shadow-md);
-}
-.bookpage .cover-lg.blank {
-  height: 285px; display: grid; place-items: center; color: var(--ghost); font-size: 44px;
-}
-.bookpage h1 {
-  font-family: var(--serif); font-weight: 700; font-size: 26px;
-  line-height: 1.25; margin: 0 0 4px; color: var(--ink-2);
-}
-.bookpage .byline { font-family: var(--serif); font-size: 15px; color: var(--ink-2); }
-.bookpage .byline a { color: var(--teal); }
-
-/* Goodreads' .bookMeta: label left, value right, #666 against black. */
-.kv { display: grid; grid-template-columns: 118px 1fr; gap: 5px 14px; font-size: 13px; }
-.kv dt { color: var(--muted); }
-.kv dd { margin: 0; word-break: break-word; }
-.kv dd.mono { font-family: var(--mono); font-size: 12px; word-break: break-all; }
-
-/* ================================================================ stages */
-.stages { display: flex; flex-direction: column; }
-.stage-row {
-  display: grid; grid-template-columns: 138px 112px minmax(0, 1fr) auto;
-  gap: 12px; align-items: start; padding: 11px 15px;
-  border-bottom: 1px solid var(--line-soft);
-}
-.stage-row:last-child { border-bottom: none; }
-.stage-row.svc-ok .stage-name { color: var(--brown); }
-.stage-name { font-family: var(--serif); font-size: 14px; color: var(--brown); }
-.stage-detail { font-size: 12.5px; color: var(--ink-2); word-break: break-word; }
-.stage-detail .why { color: var(--muted); font-style: italic; display: block; margin-top: 3px; }
-.stage-attempts { font-size: 11.5px; color: var(--ghost); margin-top: 2px; }
-
-/* ============================================================== services */
-.svc-list { display: flex; flex-direction: column; }
-.svc-row {
-  display: grid; grid-template-columns: 10px 104px minmax(0, 1fr);
-  gap: 9px; align-items: center; padding: 9px 12px;
-  border-bottom: 1px solid var(--line-soft); cursor: pointer; font-size: 13px;
-}
-.svc-row:last-child { border-bottom: none; }
-.svc-row:hover { background: var(--cream); }
-.svc-row .name { font-family: var(--serif); color: var(--brown); }
-.svc-row .note { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.svc-row.bad { background: var(--err-bg); }
-.svc-row.bad .note { color: #7d2620; }
-
-.svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 11px; }
-.svc {
-  background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 12px 14px; cursor: pointer;
-  transition: border-color .18s ease, box-shadow .18s ease;
-}
-.svc:hover { border-color: var(--teal); box-shadow: var(--shadow-sm); }
-.svc:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
-.svc.down { border-color: #e3b7b3; background: var(--err-bg); }
-.svc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-.svc-head .name { font-family: var(--serif); font-size: 15.5px; color: var(--brown); font-weight: 700; }
-.svc-head .grow { flex: 1; }
-.svc .meta { font-size: 12.5px; color: var(--ink-2); word-break: break-word; }
-.svc .impact { font-size: 12px; color: var(--muted); margin-top: 4px; font-style: italic; }
-
-.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
-.dot.ok   { background: var(--ok); }
-.dot.err  { background: var(--err); }
-.dot.warn { background: var(--warn); }
-.dot.idle { background: var(--ghost); }
-
-/* ================================================================ chips */
-.chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 7px; border-radius: 4px; font-size: 11px;
-  border: 1px solid var(--line); background: var(--cream);
-  color: var(--ink-2); white-space: nowrap;
-  transition: border-color .15s ease, background-color .15s ease, color .15s ease;
-}
-.chip.ok      { border-color: #b8dcc5; color: var(--ok); background: var(--ok-bg); }
-.chip.failed  { border-color: #e3b7b3; color: var(--err); background: var(--err-bg); }
-.chip.blocked { border-color: #e6d3a3; color: var(--warn); background: var(--warn-bg); }
-.chip.running { border-color: #b9d2e5; color: var(--info); background: var(--info-bg); }
-.chip.skipped { opacity: .7; }
-.chip.pending { opacity: .8; }
-.chip.auth    { border-color: var(--err); color: #fff; background: var(--err); font-weight: 700; }
-.chip.nodata  { border-color: var(--line); color: var(--muted); background: transparent; }
-
-/* Which service a failure belongs to. A link, always — the whole point is
-   that one click gets you to that service's own page and log. */
-.chip.svc-tag {
-  border-color: var(--line-warm); background: var(--cream-2);
-  color: var(--brown-3); font-weight: 600; text-decoration: none;
-}
-a.chip.svc-tag:hover { border-color: var(--teal); color: var(--teal); text-decoration: none; }
-
-/* ============================================================= controls */
-button, .btn {
-  font: inherit; font-size: 13px; cursor: pointer;
-  background: var(--paper); color: var(--ink-2);
-  border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 5px 11px;
-  transition: border-color .15s ease, color .15s ease, background-color .15s ease;
-}
-button:hover, .btn:hover { border-color: var(--teal); color: var(--teal); }
-button:focus-visible, .btn:focus-visible {
-  outline: 2px solid var(--teal); outline-offset: 1px;
-}
-button:disabled { opacity: .55; cursor: default; }
-button.primary { background: var(--teal); border-color: var(--teal); color: #fff; font-weight: 600; }
-button.primary:hover { background: var(--teal-dark); color: #fff; }
-button.tiny { padding: 2px 7px; font-size: 11.5px; }
-button.ghost { background: transparent; border-color: transparent; color: var(--teal); }
-button.ghost:hover { text-decoration: underline; }
-button.link { background: none; border: none; color: var(--teal); padding: 0; font-size: inherit; }
-button.link:hover { text-decoration: underline; }
-
-input[type="text"], input[type="password"], input[type="search"], select, textarea {
-  font: inherit; font-size: 13px; color: var(--ink);
-  background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 6px 9px; width: 100%;
-}
-input:focus, select:focus, textarea:focus { outline: none; border-color: var(--teal); }
-input:focus-visible, select:focus-visible, textarea:focus-visible {
-  outline: 2px solid var(--teal); outline-offset: 1px;
-}
-input::placeholder { color: var(--ghost); }
-
-label.field { display: block; margin-bottom: 11px; }
-label.field .lbl { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-label.field .hint { font-size: 11.5px; color: var(--ghost); margin-top: 3px; }
-
-/* ============================================================== filters */
-/* Goodreads' filter pills: quiet until selected, then the dark brown. */
-.filters { display: flex; gap: 5px; flex-wrap: wrap; }
-.filters button { font-size: 12.5px; border-radius: 999px; padding: 4px 12px; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
-.filters button.on {
-  background: var(--brown); border-color: var(--brown);
-  color: var(--cream); font-weight: 600;
-}
-.filters button.on .faint { color: var(--cream); opacity: .78; }
-
-.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 13px; }
+/* .grow is the shared helper declared at the top of the file; named here
+   because the toolbar is the flex row that needs it — the spacer pushes the
+   result count off the tab strip. */
 .toolbar .grow { flex: 1; }
+/* The caption for a tab strip that wraps to two rows. It must sit in one place
+   at every width: sharing the strip's flex line moved it between the two rows
+   depending on how wide it happened to be that render, so the 100% basis puts
+   it on its own line unconditionally. It then lands in the band .filters'
+   own 20px bottom margin opens — the same band viewBooks puts its "filtered
+   by …" note in — and takes the same right alignment, since .grow has already
+   pushed the result count to that edge above it. */
+.toolbar-note { flex: 1 0 100%; text-align: right; }
+
+/* ref §4 .bigTabs .tab — white, brown, square, 2px black underline when current
+   or hovered.
+
+   The strip carries the baseline itself: .bigTabs is border-bottom:1px solid
+   #D8D8D8 with margin-bottom:20px, and that rule runs under *all* the tabs, not
+   only the selected one. The app nests the strip inside .toolbar, so this
+   leaves two rules — the strip's #D8D8D8 and, 20px below it, the toolbar's own
+   #DFDFDF — which is the reference's own shape: .bigTabs' rule, then
+   .reviewControls' under it. The 20px is the tab strip's margin, so the
+   "filtered by" note the toolbar also holds sits in that band. */
+.filters {
+  display: flex; flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);   /* #D8D8D8 — .bigTabs' baseline, under every tab */
+  margin-bottom: 20px;                    /* ref §4 .bigTabs */
+}
+/* The tab keeps no fill and no rule of its own beyond the 2px black underline,
+   which is drawn on the tab's own bottom edge and sits against the strip's
+   baseline below it. `margin` is right-only because the strip starts flush with
+   the toolbar's left edge where .bigTabs' first tab has its own 5px. `outline: 0` is theirs
+   (ref §4 .bigTabs .tab) and is safe — the `.filters button:focus-visible` ring
+   declared at the top of the file is one class heavier and still draws it. */
+.filters button {
+  border: 0; border-radius: 0; background-color: var(--paper); color: var(--bar-ink);
+  font-family: var(--sans); font-size: 14px; line-height: 1.3;
+  margin: 0 5px 0 0; padding: 5px 10px; outline: 0; border-bottom: 2px solid transparent;
+}
+.filters button:hover, .filters button.on {
+  border-bottom: 2px solid var(--value); text-decoration: none; color: var(--bar-ink);
+}
+.filters button.on { font-weight: 700; }   /* .gr-button--togglable--enabled:hover precedent */
+/* The press. Hover on a tab deliberately does not move the fill — .bigTabs
+   keeps none, and the 2px underline is their whole hover — so this is the one
+   state that fills, and it fills with .gr-button:active's --line-warm, the same
+   value every other pressed control in the app uses. Declared after .on, which
+   is (0,2,1) like this rule, so the open tab presses too; the underline and the
+   bold both stay, and #382110 on #d6d0c4 is 11.9:1. */
+.filters button:active { background-color: var(--line-warm); }
+.filters button .faint { color: var(--muted); }   /* the count inside a tab */
+
+/* Retained from the frozen class list; the app renders no toolbar search field
+   today, so this is the slot it would take — a flex child that stops at 340px. */
 .search-wrap { position: relative; max-width: 340px; flex: 1; }
 
+/* ============================================================= progress */
+.progress { min-width: 160px; }
+/* The track reuses the class name `.bar`, which the header paints as the sticky
+   bar. This must therefore reset EVERY property the header sets — background,
+   position, top, z-index and the bottom rule — or the progress bar becomes a
+   sticky element, which is what the previous stylesheet did by forgetting
+   `position`. Two-class selector, so it wins on specificity, not order. */
+.progress .bar {
+  position: static; top: auto; z-index: auto;
+  background: var(--cream-2); border: 0;
+  height: 5px; border-radius: var(--radius); overflow: hidden; margin-bottom: 3px;
+}
+.progress .bar span { display: block; height: 100%; background: var(--teal); }
+/* No width transition: rule 4 of the brief forbids animation that changes
+   layout, and this one animates a box. */
+.progress .pmeta { font-size: 11px; line-height: 14px; color: var(--faint); }
+.progress .pmeta b { color: var(--ink); }
+
 /* ================================================================== log */
+/* Mono, because a log line is a machine's record of a thing that happened —
+   timestamps, stage names, ids. Goodreads has no monospace role, so --mono is
+   the app's own. */
 .log { font-family: var(--mono); font-size: 12px; max-height: 480px; overflow: auto; }
 .log .ev {
   padding: 5px 15px; border-bottom: 1px solid var(--line-soft);
@@ -412,12 +1070,532 @@ label.field .hint { font-size: 11.5px; color: var(--ghost); margin-top: 3px; }
 }
 .log .ev:last-child { border-bottom: none; }
 .log .t { color: var(--ghost); white-space: nowrap; }
+.log .msg { word-break: break-word; }
 .log .ev.error   { color: var(--err); }
 .log .ev.warning { color: var(--warn); }
-.log .msg { word-break: break-word; }
 
-/* What a service is holding up: stage, book, and why — the third column is
-   the one that makes it actionable rather than just a list of titles. */
+/* ================================================================= dots */
+/* 9px, so the 3:1 graphical-object rule applies, not the 4.5:1 text rule —
+   every one of these clears it on white by a wide margin. */
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.dot.ok   { background: var(--ok); }
+.dot.err  { background: var(--err); }
+.dot.warn { background: var(--warn); }
+.dot.idle { background: var(--ghost); }
+/* The in-flight dot, while a service re-check is open. Hollow rather than
+   filled, on purpose: every other dot in this file is a solid 9px disc, and a
+   solid disc of any colour here would be stating a verdict the check has not
+   reached yet. A ring is also the one shape that survives being read in
+   greyscale or at a glance across a 300px rail.
+   It is deliberately NOT animated. This file's rule is that Goodreads animates
+   nothing, and the state does not depend on a pulse to be seen: the word
+   "testing…" is on the row's note, on the card's meta line, on the card's chip
+   and on the button that was pressed, and app.js marks the list aria-busy.
+   That is also how the other four dots work — they are decorative spans with no
+   accessible name, and the text beside them carries the state — so a screen
+   reader hears "Kavita, testing…" here exactly as it hears "Kavita, 10
+   libraries" at rest. --teal is the app's in-flight ink, 6.33:1 on white and
+   6.26:1 on the rail row's #f4f2e9 (a 9px graphic needs 3:1). */
+.dot.testing { background: transparent; border: 2px solid var(--teal); }
+
+/* ========================================================= sign-in page */
+/* Styled today inside login.html's own <style> block, which the browser applies
+   after app.css. Defined here from the verified palette anyway: this stylesheet
+   does not style them yet, and this is the file that will own them once that
+   inline block is retired. login.html itself is not edited, and the page's body
+   padding and #submit keep their own rules there. */
+.signin { width: min(268px, 100%); margin: 0 auto; }
+/* Their wordmark is the SVG at the top of the shell; this is the signed-out page
+   standing in for it in type — Merriweather 700 with a little negative tracking
+   is the closest face in the stack already loaded. */
+.logo {
+  display: block; text-align: center;
+  font-family: var(--serif); font-weight: 700;
+  font-size: 34px; line-height: 1; letter-spacing: -.6px;
+  color: var(--ink);
+}
+.fld { display: block; margin-bottom: 14px; }
+/* The slot Goodreads fills with a reset link. It is a <button> in the markup, so
+   the global button chrome is stripped back to bare text. */
+.assist {
+  background: none; border: 0; padding: 0; font: inherit;
+  font-size: 12.5px; color: var(--teal); cursor: pointer;
+}
+.assist:hover { color: var(--teal-dark); text-decoration: underline; }
+/* The cream wash: #f4f1ea is the button fill the app also uses for chips, pills
+   and washes (see the token block). #666 on it is 5.09:1. Its 6px radius became
+   the 3px --radius — Goodreads' surfaces are 3px (controls) or 4px (panels),
+   and this is a control. */
+.assist-body {
+  margin: 10px 0 0; padding: 9px 11px;
+  background: var(--cream); border: 1px solid var(--line-warm); border-radius: var(--radius);
+  font-size: 12.5px; line-height: 1.5; color: var(--muted);
+}
+.assist-body code {
+  display: block; margin-top: 6px;
+  font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+  overflow-wrap: anywhere;
+}
+/* Their "New to Goodreads?" rule, with the one thing this page can honestly say
+   in that slot. The ::before/::after pair draw the hairline, not content. */
+.divider { display: flex; align-items: center; gap: 12px; margin: 30px 0 14px; }
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.divider span { font-size: 13px; color: var(--ink-2); }
+/* #757575 on white is 4.61:1 — this is the deliberate darkening of their
+   .greyText #999999, which fails at this size (ref §2). */
+.fine { margin: 0; text-align: center; font-size: 11.5px; line-height: 1.5; color: var(--ghost); }
+
+/* ============================================================ the data
+ *
+ * The data surfaces: the book list and book row, the genres page, the book
+ * page, the pipeline stage table, the services list and grid, the right rail,
+ * and the version page.
+ *
+ * Every value is cited: "ref §n" is a declaration read out of goodreads.com's
+ * production stylesheet. Where Goodreads has no equivalent — which is the whole
+ * pipeline and service UI, and the version page — the declaration is marked
+ * "derived" and names the real component it was taken from. Nothing is invented
+ * blind.
+ *
+ * No raw hex below: every colour this section needs is a token in the block at
+ * the top of the file, and a literal here would be a bug.
+ *
+ * Hover states are instant. None of the reference's rules for these components
+ * declares a transition — the three blocks that do define hovers (.gr-button,
+ * .nav a, .bigTabs .tab) are all written without one — so the previous file's
+ * transition declarations are not carried over.
+ */
+
+/* =============================================================== book list */
+/* ref §4 .elementList — a 1px rule between rows and nothing else. The row is
+   not a card: the cover carries the weight and the rule does the separating.
+
+   12px/18px is §1's body (body,ol,ul,td,th{font-size:12px} with
+   p{line-height:18px}), which is the context every child in this section sizes
+   against — .bookTitle is "120%" and resolves against exactly this 12px.
+
+   .elementListBrown is a name the previous stylesheet already styled and that
+   app.js may still compose; as a co-selector here it costs one token in the
+   selector list and keeps the name from being dropped. */
+.book-list,
+.elementListBrown {
+  display: flex; flex-direction: column;
+  font-size: 12px; line-height: 18px;
+}
+
+/* ref §4 .elementList, §3.7 for the geometry. Three columns: the cover, the
+   book, and the trailing status stack. 5px 10px is their row padding (5px)
+   plus the 5px their own container adds — a Goodreads row inside a panel is
+   10px in from the panel edge, not 15.
+
+   The track sizes are load-bearing, not cosmetic. The middle track carries a
+   200px floor — what a two-word title needs on one line beside a byline that
+   also stays on one line — and the third is minmax(0, auto), not plain auto,
+   so the chip strip can shrink below its max-content. The strip is flex-wrap,
+   so a narrower third track wraps the chips; plain auto sized it at its 443px
+   max-content instead and pinched the title track to 109px, which is how the
+   title, the byline, the blocker line and the "via goodreads" attribution all
+   ended up wrapped. The chips wrap now; the title cannot. */
+.book-row,
+.elementList {
+  display: grid; grid-template-columns: 52px minmax(200px, 1fr) minmax(0, auto);
+  gap: 13px; padding: 5px 10px;
+  border-bottom: 1px solid var(--line-list);   /* #d7d7d7 — .elementList's rule */
+  cursor: pointer;
+}
+/* ref §4 .elementListLast — the last row keeps the padding, not the rule. */
+.book-row:last-child,
+.elementListLast { border-bottom: none; }
+
+/* --sunk #f4f2e9, the .siteHeader/#discoveryBox base, is the one warm grey in
+   their palette light enough to wash a row under 12px text (§2). The old
+   #fbfaf8 was the app's own tint and is not a Goodreads value. */
+.book-row:hover { background: var(--sunk); }
+/* Pressing a row you are already hovering has to do something, or a row is the
+   one control in the app that cannot be told from a hover — and rows are the
+   app's primary navigation. The press is the second step of the same ramp the
+   cream controls use (--sunk → --line-warm, .gr-button:active's fill), which is
+   what makes a row press feel like a button press. Every ink in the row clears
+   it: --ink-2 8.2:1, --muted 5.3:1, --teal 5.6:1, and the chips are their own
+   surfaces. */
+.book-row:active { background: var(--line-warm); }
+
+/* ref §4 .bookCover — 52×78 is their canonical 100×150 thumbnail at the scale
+   this row can afford, and it is that ratio because 100×150 is 2:3. The 2px
+   #ccc shadow is theirs verbatim and is deliberately not scaled with the box:
+   Goodreads has no elevation scale (§2), so there is one shadow, not two.
+
+   object-fit: cover, derived — the box is fixed by the grid, and cover art is
+   not always 2:3, so the alternative is a distorted image. */
+.book-row .cover {
+  width: 52px; height: 78px; display: block;
+  object-fit: cover;
+  background: var(--cream-2);            /* the empty-image ground, .box h2 tone */
+  box-shadow: var(--shadow-cover);
+}
+/* derived: no Goodreads equivalent — the fallback when cover_url is absent or
+   404s (app.js replaces the <img> with this div). It takes the cover's exact
+   box so the rows keep their rhythm with one book missing its art. --muted,
+   not --ghost, because the placeholder is a text glyph: 5.79:1 on --cream-2
+   against --ghost's 3.74:1. */
+.book-row .cover.blank {
+  display: grid; place-items: center;
+  color: var(--muted); font-size: 18px;
+}
+
+/* ref §4 .bookTitle — serif, bold, 120% (of the 12px row = 14.4px), 1.3.
+   Straight from their rule, including the percentage. */
+.book-row .title,
+.bookTitle {
+  font-family: var(--serif); font-weight: bold;
+  font-size: 120%; line-height: 1.3; color: var(--ink-2);
+}
+/* ref §1 .authorName — serif, and 12px/150% because the later
+   .authorName,.content620 .smallText{font-size:12px;line-height:150%} wins
+   over the 13px one. The byline is a title, so it stays in Merriweather. */
+.book-row .byline,
+.authorName {
+  font-family: var(--serif); font-size: 12px; line-height: 150%;
+  color: var(--ink-2); margin-top: 1px;
+}
+/* ref §6 .bookMeta — Lato, 12px, line-height 1.15 (their small/.gr-metaText
+   band), #666 labels. The chips nested in here are §3.5's and set their own
+   11px absolutely; this rule must not put a font-size on .chip. */
+.book-row .meta,
+.bookMeta {
+  font-family: var(--sans); font-size: 12px; line-height: 1.15;
+  color: var(--muted);
+}
+
+/* derived: the trailing column of the row. Goodreads puts the row's control in
+   a right-hand cell too (.reviewControls--right floats right inside its
+   toolbar); here it is the grid's auto column, right-aligned so the status
+   chips line up down the page. */
+.book-row .side {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 5px;
+}
+
+/* The one line per book that says what is wrong and who is to blame.
+   derived: no Goodreads equivalent. Colours are the two verified alert inks
+   from §3.6 — the error ink for a failure, the confirm ink for "waiting on
+   someone", --muted for "nothing is wrong, this is just where it is". */
+.blocker { margin-top: 6px; font-size: 12.5px; }
+.blocker .msg { color: var(--err); word-break: break-word; }
+.blocker .msg.soft { color: var(--warn); }
+.blocker .msg.quiet { color: var(--muted); }
+
+/* derived: the per-stage chips under the row's status. No Goodreads
+   equivalent — their rows carry one want-to-read button, not a pipeline — so
+   the 3px gap is the app's own, deliberately tight because these are 11px
+   labels and a second line of them must still read as one object. */
+.pipeline { display: flex; gap: 3px; flex-wrap: wrap; }
+
+/* =========================================================== categories map */
+/* The category axis — the closed set in categories.yml — because the category
+   is what names a directory; a scraped genre is only the input a rule matched.
+   Goodreads has no page that lists where it files anything, so the shape is
+   assembled from the two components it does have and neither is invented: the
+   pills are `.filters` (the .bigTabs strip above, reused verbatim — this page
+   owns no second filter widget), and the rows are #myBooks.tableList — a padded
+   row closed by a 1px #d7d7d7 rule (--line-list), no zebra, no outer border.
+   The category name inside a row is `.shelfLink`, the same teal link the book
+   page uses for a shelf you can open.
+
+   The meta band under a panel heading sits on the .body.tight inset and closes
+   with the same #d7d7d7 rule the rows below carry, so the row block has a top
+   edge and keeps its own flush 5px 10px inset. */
+.panel-meta { display: flex; flex-direction: column; gap: 5px; border-bottom: 1px solid var(--line-list); }
+.gline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; }
+/* .bookMeta / .keyValue label ink (ref §1, §2) — the label half of a pair.
+   min-width so every band's labels line up as one column, and it collapses
+   below 780px where .gline wraps anyway. 86px is the longest label the band
+   carries ("Genres seen") at 12px Lato. */
+.gline .lbl { font-size: 12px; color: var(--muted); min-width: 86px; }
+/* The count inside a chip. .faint is #767676, which is 4.03:1 on the chip's
+   --cream fill and fails at 11px; --muted holds 5.09:1 on the same fill. Same
+   move .panel > h2 makes for the count in a heading, and the reason it is
+   declared here rather than changed on .faint. */
+.gline .chip .faint { color: var(--muted); }
+/* The fix, not the fault — .stage-detail .why's treatment, which is where the
+   app already puts "here is what this means, nothing is broken". An empty
+   notebook, an unconfigured category and a fallback genre are all that, and
+   none of them is an error, so none of them may render as one. */
+.gline .src-note { font-size: 12px; font-style: italic; color: var(--muted); }
+/* The one figure on the band that is work waiting rather than a value: "2
+   flagged for review" takes the confirm ink. #6b5633 on white is 6.55:1. */
+.gline .flag-note { color: var(--warn); }
+/* A sentence of explanation, full width. Not a .gline: a label column plus a
+   paragraph strands the label on a line of its own, which reads as a broken
+   row. --muted and upright, the treatment the book list already gives its own
+   explanatory note (.body.tight.small.muted), rather than .src-note's italic —
+   an italic paragraph of this length is hard work. #666666 on white is 5.74:1
+   at 12.5px. */
+.band-note { font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+
+/* The map itself: category, folder on disk, notebook, count. The head row is
+   the same grid with the 12px bold uppercase ink a section heading uses, which
+   is how Goodreads marks a column header (#myBooks.tableList th, ref §4). */
+.cat-table { display: flex; flex-direction: column; }
+.cat-row {
+  display: grid; grid-template-columns: 150px minmax(0, 1fr) minmax(0, 1fr) 54px;
+  gap: 12px; align-items: baseline; padding: 9px 15px;
+  border-bottom: 1px solid var(--line-list);
+  font-size: 13px; line-height: 18px;
+}
+.cat-row > span:last-child { text-align: right; }   /* the count column */
+.cat-row .mono { font-family: var(--mono); font-size: 11px; word-break: break-all; }
+.cat-row.head { border-bottom-color: var(--line); }
+/* The degraded-state note above the table, on the same inset the rows use so it
+   reads as the first line of the table rather than loose text in the panel. */
+.cat-note { padding: 9px 15px; border-bottom: 1px solid var(--line-list); }
+.cat-row.head > span {
+  font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--brown);
+}
+/* The fallback marker in the category cell. A word, not a dot, for the same
+   reason the genre strip's marker was one: the row is scanned left to right and
+   a dot would need a legend. --warn is the confirm ink (#6b5633) — the
+   palette's "note this, nothing is broken" colour, which is what the fallback
+   category is; never --err. */
+.cat-tag {
+  margin-left: 6px; font-size: 11px; text-transform: uppercase; color: var(--warn);
+}
+
+/* ref §4 .shelfLink — teal for a shelf you can open. It is a <button> here
+   rather than an <a>, because selecting a category is an in-page filter, not a
+   navigation; it carries the link accent because that is what it reads as.
+   #00635d on white is 6.62:1. */
+.shelfLink {
+  background: none; border: 0; padding: 0;
+  font-family: var(--sans); font-size: 13px; line-height: 1.5;
+  color: var(--teal); cursor: pointer;
+}
+.shelfLink:hover { text-decoration: underline; }
+/* The count inside a shelf link, de-emphasised the way the count inside a tab
+   is (.filters button .faint). */
+.shelfLink .faint { color: var(--muted); }
+
+/* =============================================================== book page */
+/* derived: two columns, cover then data. Goodreads floats the cover
+   (.cover{float:left;margin-right:10px}) rather than gridding it; the 190px
+   is the app's, and 190×285 is .bookCover's 2:3 at the size a detail page can
+   afford. The 780px breakpoint collapses this to one column. */
+.bookpage { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 22px; }
+.bookpage .cover-lg {
+  width: 190px; background: var(--cream-2);
+  box-shadow: var(--shadow-cover);       /* ref §4 .bookCover, unscaled — see above */
+}
+/* derived: the missing-cover fallback, same box as the real cover. */
+.bookpage .cover-lg.blank {
+  height: 285px; display: grid; place-items: center;
+  color: var(--muted); font-size: 44px;
+}
+/* ref §1 .gr-h1 at their size, in the book-title face: 24px/1.25 #333.
+   (Their .gr-h1 is Lato; this file sets a book title in Merriweather, because a
+   title is a title, and the serif is what makes it read as a Goodreads book
+   page rather than as an app heading.) */
+.bookpage h1 {
+  font-family: var(--serif); font-weight: bold;
+  font-size: 24px; line-height: 1.25; margin: 0 0 4px; color: var(--ink-2);
+}
+/* ref §1 row 3 — the byline on a book page is 16px, two steps up from the
+   13px list byline, in the same serif. */
+.bookpage .byline { font-family: var(--serif); font-size: 16px; color: var(--ink-2); }
+
+/* ref §6 .keyValue — label #666, value black, Lato, on 18px lines. The 118px
+   label column is the app's (their labels are inline in a table cell); it is
+   the width the longest label here needs without wrapping. */
+.kv {
+  display: grid; grid-template-columns: 118px 1fr; gap: 5px 14px;
+  font-family: var(--sans); font-size: 12px; line-height: 18px;
+}
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; color: var(--value); word-break: break-word; }   /* .keyValue .value{color:black} */
+/* ids, paths and timestamps — states the app has and Goodreads does not. */
+.kv dd.mono { font-family: var(--mono); font-size: 11px; word-break: break-all; }
+
+/* ================================================================= stages */
+/* derived: the app's per-book stage table. Goodreads' nearest row is
+   #myBooks.tableList — a padded row under a 1px rule — which is what each
+   .stage-row is; the four columns are the app's own (stage, status, detail,
+   action). The rule between rows is --line-soft, not --line-list, because
+   these rows separate stages of one item: the divider should be quieter than
+   the boundary of the item itself. */
+.stages { display: flex; flex-direction: column; }
+.stage-row {
+  display: grid; grid-template-columns: 138px 112px minmax(0, 1fr) auto;
+  gap: 12px; align-items: start; padding: 11px 15px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.stage-row:last-child { border-bottom: none; }
+/* The 15px inset matches .panel .body, so a flush list lines up with the
+   padded bodies above it; 11px vertical because this row carries two lines on
+   the left (stage + attempt count) and up to two on the right (detail + why). */
+
+/* derived: a stage name is a name, so it is set the way Goodreads sets names —
+   Merriweather (ref §4 .bookTitle / .authorName) — in the heading ink
+   #382110 they use for h1–h6. */
+.stage-name { font-family: var(--serif); font-size: 14px; color: var(--brown); }
+/* A stage whose service is healthy. svc-ok is not emitted by app.js today; the
+   selector is kept so the name survives the restyle. */
+.stage-row.svc-ok .stage-name { color: var(--brown); }
+.stage-detail { font-size: 12.5px; color: var(--ink-2); word-break: break-word; }
+/* The fix, not the fault: muted and italic, so it reads as an aside under the
+   detail rather than as a second error. */
+.stage-detail .why { color: var(--muted); font-style: italic; display: block; margin-top: 3px; }
+.stage-attempts { font-size: 11.5px; color: var(--ghost); margin-top: 2px; }
+
+/* =============================================================== services */
+/* ref §4 .elementList — a flush list of rows inside a box, each a padded line
+   under the canonical `1px solid #d7d7d7` rule and nothing else. These are the
+   rail's service rows, and they were the one list in the file dividing with
+   --line-soft (#e8e8e8); at 300px wide a rule that faint does not read as a
+   rule, so the rows floated instead of stacking, which is most of what made the
+   column look unrhythmic beside the main panels.
+   --line-soft is right for .stage-row and .log .ev and stays there: their
+   comment says why, and it is a real distinction — those divide the stages of
+   ONE item, so the divider should be quieter than the boundary of the item.
+   These rows are independent services, each its own entity, which is exactly
+   the .elementList case the brief names.
+   15px matches .panel .body and .held-row, so a flush list lines up with the
+   padded bodies above it; the old 12px matched nothing.
+   Three columns: the health dot, the name, the state.
+   The state is right-aligned, which is one of the two shapes the brief allows
+   for a name/detail pair. It used to sit in a second column fixed at 104px,
+   which spent the same 104px on "Kavita" as on "Open Notebook" and dropped the
+   detail just after the name with a void beyond it — so the column's right
+   edge, which is the one line the eye can follow down a list of seven rows,
+   was ragged. Against the row's 15px inset the names now form a left column
+   and the states a right one. */
+.svc-list { display: flex; flex-direction: column; }
+.svc-row {
+  display: grid; grid-template-columns: 9px minmax(0, 1fr) minmax(0, max-content);
+  gap: 9px; align-items: start; padding: 9px 15px;
+  border-bottom: 1px solid var(--line-list); cursor: pointer; font-size: 13px;
+}
+.svc-row:last-child { border-bottom: none; }
+/* The row whose page is open. A class rather than the inline
+   `style="background:var(--cream-2)"` it used to carry, because a style
+   attribute outranks every rule in this file and the row was therefore the one
+   row in the list that could not be hovered.
+   The hover below restates --sunk rather than letting the current row keep its
+   tint, so hover means one thing in this list; the tint is what you see at
+   rest. */
+.svc-row.current { background: var(--cream-2); }
+/* An <a> is teal by default (ref §1 a{color:#00635d}). The row keeps the link
+   behaviour but not the link colour, or the rail becomes a wall of teal and
+   nothing in it reads as clickable. */
+.svc-row .name { font-family: var(--serif); color: var(--brown); }
+/* The state is what the row exists to tell you, so it is the column that gives
+   when the name is long: `minmax(0, max-content)` prefers the full string and
+   shrinks only when there is nothing left to take, and the ellipsis makes that
+   shrink visible rather than letting the text run off the card. */
+.svc-row .note {
+  color: var(--muted); font-size: 12px; text-align: right;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* The error alert's own surface (§3.6) for a service that is down. */
+.svc-row.bad { background: var(--alert-err-bg); }
+.svc-row.bad .note { color: var(--err); }
+/* The two pointer states, last in the block and spelled out for every
+   combination a row can be in. This is the fix for the audit's top finding:
+   .svc-row.bad is (0,2,0), it tied with .svc-row:hover at (0,2,0), and it was
+   declared later — so the rows carrying the bad news were the only rows in the
+   rail with no pointer feedback at all, in the state the whole feature exists
+   for. Enumerating the combinations here rather than moving .bad above the
+   hover keeps .bad winning at rest (which is what the pink is for) and makes
+   the override explicit instead of order-dependent: (0,4,0) beats every other
+   form of these rows from anywhere in the file.
+   --sunk is the hover wash every row in this file uses; --line-warm is
+   .gr-button:active, the design system's pressed fill, and the second step of
+   the same ramp. The dot and the row's own ink keep saying what the service is
+   doing while the pointer sweeps the surface — nothing is hidden by this, the
+   two facts are simply drawn on different layers.
+   text-decoration:none because this row is an <a> and a full-bleed row that
+   underlines every child on hover reads as broken — .health-pill:hover and
+   .nav a:hover set it for the same reason (§3.12, §3.1). */
+.svc-row:hover, .svc-row.bad:hover, .svc-row.current:hover, .svc-row.bad.current:hover {
+  background: var(--sunk); text-decoration: none;
+}
+.svc-row:active, .svc-row.bad:active, .svc-row.current:active, .svc-row.bad.current:active {
+  background: var(--line-warm); text-decoration: none;
+}
+/* While a re-check is open (app.js's healthChecks). The row keeps its place,
+   its name and its dot column; only what it claims changes, so the list does
+   not reflow and the eye stays where it was. --info is the link teal, the app's
+   established "in flight" ink (.chip.running draws the same hollow box in it);
+   6.33:1 on white and 5.6:1 on the current row's --cream-2. app.js drops .bad
+   in this state, so no pink alert surface is left under a row that is saying it
+   does not know yet. */
+.svc-row.testing .note { color: var(--info); }
+/* The dot is centred on the FIRST LINE, not on the row. The two are the same
+   for a name that fits on one line and different the moment one does not:
+   `align-items:center` on the row put the dot against the middle of a wrapped
+   two-line name, which is how it ends up beside neither line. 4.5px is
+   (18px line / 2) - (9px dot / 2), so the dot's middle lands on the line box's
+   middle — measured back at 45.25px from the row top against the text's own
+   x-height centre at 45.1px, which is where it was already reading correctly
+   and is why the size of the dot is left alone. */
+.svc-row .dot { margin-top: 4.5px; }
+
+/* derived: Goodreads lays cards out with floats (.sellingPointBoxLeft/Right),
+   not a grid; auto-fit keeps two 270px+ cards on a 625px column and one on a
+   narrow one. The gutter is the app's own, tightened from the panel rhythm
+   because these cards already carry their own border. */
+.svc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 11px; }
+/* ref §4 .orderConfirmation__card — .svc is a panel by another name (paper, 1px
+   #d8d8d8, the 4px radius), so it takes the same treatment as .panel and .tile
+   (§3.6). */
+.svc {
+  background: var(--paper); border: 1px solid var(--line);
+  border-radius: var(--radius-lg); padding: 12px 14px; cursor: pointer;
+}
+/* derived from .dropdown__trigger--personalNavActive + .selectedTab (§3.6),
+   the same hover .tile uses. No shadow and no transform: ref §2 has no
+   elevation scale, and a card that lifts off the page is not their language. */
+/* The two verified error-alert surfaces, not the app's old tins. */
+.svc.down { border-color: var(--alert-err-line); background: var(--alert-err-bg); }
+/* The pointer states come after .svc.down for the same reason the rail's do:
+   .svc:hover and .svc.down are both (0,2,0), and .down is declared later, so a
+   card that was actually down — the only cards this page exists to show — had
+   no hover at all. The alert surface stays at rest; only the edge moves on
+   hover and the fill on press. The whole card is the click target (onclick on
+   the div), so it presses like one: --line-warm, .gr-button:active, the fill
+   every other pressed control uses, and one that every ink inside it clears
+   (--ink-2 8.2:1, --muted 5.3:1, --brown 11.9:1; the chips are their own
+   surfaces). */
+.svc:hover, .svc.down:hover { border-color: var(--bar-hover); }
+.svc:active, .svc.down:active {
+  background: var(--line-warm); border-color: var(--line-warm);
+}
+/* While a re-check is open. The card's own edge goes teal, the same colour as
+   the chip and the dot inside it, so a grid of six cards reads as one state
+   rather than six. Declared last so it outranks the hover edge above: what the
+   card is reporting beats who is pointing at it. */
+.svc.testing { border-color: var(--teal); }
+.svc.testing:hover { border-color: var(--teal); }
+.svc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+/* A service name is a card title: Merriweather (serif is what their card
+   panels, #newAccountBox, are set in — ref §4) at .gr-h4's 16px, in the
+   .bookTitle ink. */
+.svc-head .name {
+  font-family: var(--serif); font-size: 15.5px;
+  color: var(--brown); font-weight: bold;
+}
+.svc .meta { font-size: 12.5px; color: var(--ink-2); word-break: break-word; }
+/* The card's "testing…" line, in the same in-flight teal as the rail's note. */
+.svc.testing .meta { color: var(--info); }
+/* What the outage actually blocks — muted, italic, so it reads as a note under
+   the fact rather than as a second fact. */
+.svc .impact { font-size: 12px; color: var(--muted); margin-top: 4px; font-style: italic; }
+
+/* ============================================================== held rows */
+/* derived: what one service is holding up. A table row like .stage-row — a
+   chip, a title, a reason — with the reason in the wide column, because the
+   reason is the only part that makes the row actionable.
+
+   The one-column fallback lives in the 780px breakpoint; without it the third
+   its share of a width that no longer existed and the reason smeared one
+   character per line down the page. */
 .held-row {
   display: grid; grid-template-columns: 92px minmax(150px, 260px) minmax(0, 1fr);
   gap: 10px; align-items: baseline; padding: 8px 15px;
@@ -427,120 +1605,424 @@ label.field .hint { font-size: 11.5px; color: var(--ghost); margin-top: 3px; }
 .held-row .chip { justify-self: start; }
 
 /* =============================================================== right rail */
-.rail-card {
-  background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--radius); margin-bottom: 14px; overflow: hidden;
-}
-.rail-card > h3 {
-  margin: 0; padding: 9px 13px; font-size: 11.5px; font-weight: 700;
-  letter-spacing: .5px; text-transform: uppercase; color: var(--brown-3);
-  background: var(--cream-2); border-bottom: 1px solid var(--line);
-  display: flex; align-items: center; gap: 8px;
-}
-.rail-card > h3 .grow { flex: 1; }
-.rail-card .body { padding: 11px 13px; }
+/* .rail-card and its heading are declared with .panel and .panel > h2 in the
+   panels section above — one rule, so the rail cannot drift out of the family
+   it is read next to. What is here is only what a rail box has that a main
+   panel does not: .rail-actions, .rail-check, .rail-note and .rail-foot.
+   .rail-card .body is deliberately not restyled here either: .panel .body sets
+   the padding and this takes it unchanged. A rail body that needs less uses
+   .body.tight, which the panels section owns. */
 
-/* =============================================================== toasts */
-#toasts { position: fixed; right: 16px; bottom: 16px; z-index: 100; display: flex; flex-direction: column; gap: 8px; max-width: 380px; }
-.toast {
-  background: var(--paper); border: 1px solid var(--line); border-left: 4px solid var(--teal);
-  border-radius: var(--radius); padding: 10px 13px; font-size: 13px;
-  box-shadow: var(--shadow-lg);
+/* Run control's two buttons, on one row. `1fr 1fr` rather than the inline
+   .row they sat in, because a flex row sizes each button to its own label:
+   "Sweep now" and "Check shelf" measured 80px and 83px and stopped 117px short
+   of the card's right edge, so the pair read as two leftovers rather than as a
+   control block. Equal tracks give them 130px each and a shared right edge,
+   which is .gr-button--fullWidth's move (ref §4) at the rail's scale. */
+.rail-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.rail-actions button, .rail-actions .btn { width: 100%; }
+
+/* The auto-shelve toggle, on its own line under the buttons. The native
+   checkbox carries a 13px box and the browser's blue; accent-color brings it
+   into --teal, the one action colour, without inventing a control Goodreads
+   does not have. `flex-start` plus a 2px nudge centres the box on the first
+   line of the label: the label is 12.5px on a 17px line, so (17 - 13) / 2. */
+.rail-check {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin: 6px -15px 0; padding: 6px 15px;
+  font-size: 12.5px; line-height: 17px; color: var(--ink-2); cursor: pointer;
 }
-.toast.ok  { border-left-color: var(--ok); }
-.toast.err { border-left-color: var(--err); }
-.toast .tt { font-weight: 700; margin-bottom: 2px; }
-.toast .tb { color: var(--ink-2); font-size: 12.5px; word-break: break-word; }
+.rail-check input { flex: none; margin: 2px 0 0; accent-color: var(--teal); }
+/* The whole label is the target, so the whole label lights up — same --sunk
+   row hover as .svc-row above, and the negative inset plus the matching
+   padding carry the wash out to the card's own edge, which is what makes it
+   read as a row and not as a box drawn inside the body. The press is the
+   second step of the same ramp, .gr-button:active's --line-warm; the label's
+   #333333 is 8.2:1 on it. */
+.rail-check:hover { background: var(--sunk); }
+.rail-check:active { background: var(--line-warm); }
+.rail-check > span { flex: 1; }
 
-/* ============================================================== helpers */
-.row { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
-.row.tight { gap: 5px; }
-.grow { flex: 1; }
-.muted { color: var(--muted); }
-.faint { color: var(--faint); }
-.ghost { color: var(--ghost); }
-.small { font-size: 12px; }
-.mono { font-family: var(--mono); }
-.gold { color: var(--gold); }
-.mt { margin-top: 13px; }
-.nowrap { white-space: nowrap; }
-.empty { padding: 28px 15px; text-align: center; color: var(--muted); }
+/* The disk-free line, as .bookMeta writes a label/value pair (ref §1, §2): the
+   count is the value and takes --ink-2, the sentence around it stays --muted.
+   It was .small.faint, which made the one number on the line — the number the
+   line exists to tell you — the quietest thing in the card. */
+.rail-note { margin: 12px 0 0; font-size: 12px; line-height: 17px; color: var(--muted); }
+.rail-note b { color: var(--ink-2); font-weight: 700; }
 
-.progress { min-width: 160px; }
-.progress .bar { height: 5px; background: var(--cream-2); border-radius: 3px; overflow: hidden; margin-bottom: 3px; }
-.progress .bar span { display: block; height: 100%; background: var(--teal); border-radius: 3px; transition: width .4s ease; }
-.progress .pmeta { font-size: 11.5px; color: var(--muted); }
-.progress .pmeta b { color: var(--ink); }
-
-/* =============================================================== narrow */
-@media (max-width: 1000px) {
-  .page { grid-template-columns: minmax(0, 1fr); }
-  .rail { order: 2; }
+/* The card's footer. The release link used to be the last item in the body
+   with a 9px gap over it, which left it looking like a tag that had fallen to
+   the bottom; a hairline and a full-width band make it the thing that closes
+   the card. Derived: Goodreads has no release link, so the band borrows the
+   .elementList rule and the .gr-button--fullWidth full-width box (ref §4) and
+   nothing else. */
+.rail-foot {
+  display: flex; padding: 9px 15px;
+  border-top: 1px solid var(--line-list);
 }
-@media (max-width: 780px) {
-  .bar-inner { height: auto; flex-wrap: wrap; padding: 8px 12px; gap: 4px; }
-  .nav { order: 3; width: 100%; overflow-x: auto; }
-  .nav a { padding: 0 11px; font-size: 14px; line-height: 40px; }
-  .bar-search { order: 2; flex: 1; }
-  .bar-search input { width: 100%; max-width: none; }
-  .wordmark { font-size: 19px; }
-  .page { padding: 12px; }
-  .bookpage { grid-template-columns: 1fr; }
-  .bookpage .cover-lg { width: 130px; }
-  .stage-row { grid-template-columns: 1fr; gap: 5px; }
-  .book-row { grid-template-columns: 44px minmax(0, 1fr); }
-  .book-row .side { grid-column: 2; align-items: flex-start; }
-  .svc-row { grid-template-columns: 10px minmax(0, 1fr); }
-  .log .ev { grid-template-columns: 1fr; gap: 2px; }
-  /* Without this the third column kept its `minmax(0,1fr)` share of a width
-     that no longer exists, and the reason text rendered one character per
-     line — a vertical smear of letters down the page. */
-  .held-row { grid-template-columns: 1fr; gap: 3px; padding: 9px 15px; }
-  .held-row .chip { justify-self: start; }
-}
+.rail-foot .sidebar-version { width: 100%; box-sizing: border-box; }
+/* The new-release dot pins to the far edge of the band, so it reads as a
+   notification on the card rather than as punctuation after "What's new". */
+.rail-foot .sidebar-version .new-dot { margin-left: auto; }
 
-/* =========================================================== version page */
-/* A single scrollable timeline of releases — one entry per version, newest
-   first. Each entry is its own panel-like block (paper on cream, matching
-   .panel) so long changelogs still read as a list of distinct events rather
-   than one undifferentiated wall of text. */
+/* ============================================================= version page */
+/* A single scrollable timeline of releases, one entry per version, newest
+   first. Each entry is its own panel-like block so a long changelog reads as
+   a list of distinct events instead of one wall of text — paper on paper now
+   that the page is #FFFFFF, separated by the entry's own border, which is why
+   the border and the 14px gap both matter here. */
 .version-page { display: flex; flex-direction: column; gap: 14px; max-width: 760px; }
+/* Same panel as .panel/.rail-card (§3.6): white, #d8d8d8, 4px. */
 .version-entry {
   background: var(--paper); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 14px 16px;
-  box-shadow: var(--shadow-sm);
+  border-radius: var(--radius-lg); padding: 14px 15px;
 }
+/* Version number, date and (on the current release) a tag, on one baseline. */
 .version-entry .vhead {
   display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
   margin-bottom: 6px;
 }
+/* The number is the entry's title: serif bold, the .bookTitle treatment, at
+   .gr-h4's 16px. */
 .version-entry .vnum {
-  font-family: var(--serif); font-weight: 700; font-size: 17px; color: var(--brown);
+  font-family: var(--serif); font-weight: bold; font-size: 16px;
+  line-height: 1.25; color: var(--ink-2);
 }
-.version-entry .vdate { font-size: 12px; color: var(--muted); }
+/* A date is meta text: 12px, muted, on the tight meta line-height (ref §1
+   small,.gr-metaText{font-size:12px;line-height:1.15}). */
+.version-entry .vdate { font-size: 12px; line-height: 1.15; color: var(--muted); }
+/* derived: "current". Their nearest tag is .gr-button--small's box (11px, 3px
+   radius, 1px border) in the link accent, which is also how the app marks
+   anything else that is live (.chip.running, §3.5). A square-ish 3px radius,
+   not a pill: their controls are 3px and their panels 4px, and nothing in
+   between. */
 .version-entry .vtag {
-  font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px;
-  color: var(--teal); border: 1px solid var(--teal); border-radius: 999px;
-  padding: 1px 8px;
+  font-size: 11px; line-height: 1.45; text-transform: uppercase; letter-spacing: .5px;
+  color: var(--teal); border: 1px solid var(--teal); border-radius: var(--radius);
+  padding: 2px 8px;
 }
-.version-entry ul.vchanges { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: var(--ink-2); }
+/* Change lists: the body scale (12px/18px, §1), indented the way their own
+   lists are, with the entries spaced so a multi-line item still reads as one
+   item. */
+.version-entry ul.vchanges {
+  margin: 6px 0 0; padding-left: 18px;
+  font-size: 12px; line-height: 18px; color: var(--ink-2);
+}
 .version-entry ul.vchanges li { margin-bottom: 3px; }
 
-/* ======================================================== sidebar version */
-/* Small pill/link for the right rail (follows .rail-card's look) showing the
-   running app's version number, with a quiet dot when a newer release has
-   shipped since the viewer last opened this. Clicking it goes to
-   .version-page above. */
+/* ============================================================ sidebar version */
+/* The rail's release link. Derived: no Goodreads equivalent — a 3px-radius
+   box (§4: their controls are 3px), link-coloured only on
+   hover, so it sits quietly in the rail until wanted. It carries a .new-dot
+   when a newer release has shipped since the viewer last opened this. */
 .sidebar-version {
   display: inline-flex; align-items: center; gap: 6px;
   font-size: 12px; color: var(--muted);
-  border: 1px solid var(--line); border-radius: 999px;
+  border: 1px solid var(--line); border-radius: var(--radius);
   padding: 4px 10px; background: var(--paper);
-  text-decoration: none; transition: border-color .15s ease, color .15s ease;
+  text-decoration: none;
 }
 .sidebar-version:hover { border-color: var(--teal); color: var(--teal); text-decoration: none; }
+/* Pressing it goes a step past the hover rather than repeating it: the fill
+   takes .gr-button:active's --line-warm and the ink goes to --teal-dark
+   (.gr-button--teal:hover, the palette's other teal), which is 6.1:1 on that
+   fill. Both are values the design system already uses; the link's own
+   --muted #666666 would only just clear 5.3:1 on the pressed fill, and this is
+   a control, not body text. */
+.sidebar-version:active {
+  background: var(--line-warm); border-color: var(--line-warm);
+  color: var(--teal-dark); text-decoration: none;
+}
 .sidebar-version .vnum { font-family: var(--mono); color: var(--ink-2); }
+/* ref §2 — #fa604a is .gr-button--red, their alert orange, and this is the one
+   place the app uses it: a 6px dot, which is a graphic, not a label. It is
+   never text: 2.4:1 on white would fail rule 5 of the brief. */
+.new-dot,
 .sidebar-version .new-dot {
   width: 6px; height: 6px; border-radius: 50%; background: var(--coral);
   flex: none; display: inline-block;
+}
+
+/* ==================================================== quiet ink on a pressed fill
+ * The rows and cards press into --line-warm, and this file's two quiet greys do
+ * not survive it: --muted #666666 measures 3.74:1 on that fill and --faint
+ * #767676 measures 2.96:1, both below the 4.5:1 the brief requires of 12px
+ * text. A pressed background that makes a row harder to read than it was is
+ * worse than no pressed state, which is the case this rule exists to avoid.
+ *
+ * So the quiet ink steps up with the surface: for as long as the button is
+ * down, --muted and --faint text takes --ink-2, which is 8.23:1 on the fill and
+ * is the ink the row's own title already uses. Nothing moves that carries a
+ * state: the red of a down service, the teal of a check in flight and the amber
+ * of a soft blocker all clear the fill on their own (9.26, 4.65, 4.55), so they
+ * keep their colours and are re-stated below at a weight that outranks the lift.
+ *
+ * Grouped here rather than with each component because it is one decision —
+ * "what happens to quiet ink when the surface darkens" — made once for three
+ * surfaces, and because it has to outrank the components it touches:
+ * .svc-row.bad .note is (0,3,0) and ties with the lift on .svc-row:active
+ * .note, so the two state inks have to be re-stated one class heavier than both.
+ */
+.svc-row:active .note,
+.book-row:active .meta,
+.book-row:active .faint,
+.book-row:active .blocker .msg.quiet,
+.svc:active .impact,
+.svc:active .faint {
+  color: var(--ink-2);
+}
+.svc-row.bad:active .note     { color: var(--err); }
+.svc-row.testing:active .note { color: var(--info); }
+
+/* ========================================================== text links press *//* The controls with no box of their own: a service name inside a banner, a book
+   title inside a row, a held book, "View on Goodreads". They have nothing to
+   fill, so their press is the ink, and the ink they press into is --teal-dark —
+   the one darker teal in the palette, .gr-button--teal:hover, which is where
+   their own stylesheet takes a teal control when it goes down. The underline
+   that hover draws stays on through the press, so the two states are separate:
+   hover says "this is a link", press darkens the word under the finger.
+   This is a list and not `a:active` for a reason. A bare `a:active` is (0,1,1)
+   and the links this file actually renders — .book-row .title, .svc-row .name,
+   .chip.svc-tag, .sidebar-version — all carry a colour rule of their own at
+   (0,2,0) or above, so a global rule would be beaten by exactly the anchors
+   that have something to say, while silently repainting every plain anchor it
+   did reach. Each of those controls has its own pressed state above; this block
+   is the residue, and it is declared here, after them and after the last
+   component rule in the file, so it can only ever reach what is left.
+   The whole row is the target in a book row, so the row's own --line-warm press
+   is the feedback there and the title is a bonus on top of it: pressing the
+   title directly darkens the word as well. The one link this cannot reach is
+   the dashboard's "Downloading now" title, which carries an inline
+   `color:var(--ink-2)` (app.js) — an inline style outranks every rule here, so
+   it keeps its press from the row around it instead. */
+.banner a:active,
+.held-row a:active,
+.book-row .title:active,
+.svc-row .name:active,
+a[target="_blank"]:active {
+  color: var(--teal-dark);
+}
+
+/* ========================================================= sign-in page states
+ * The two controls on /login whose states live inside login.html's own <style>
+ * block, which the browser applies after this file. They are still this file's
+ * to finish — the sign-in section above already styles the rest of that page
+ * from the same palette, for the same stated reason — so these are written at
+ * `.signin` + id/class weight, which is what it takes to be read at all on a
+ * page whose own block wins every tie.
+ */
+/* #submit is #181818 at rest and #000000 on hover, so there is no darker step
+   left for the press to take, and a lighter one is not available either: on
+   this button lighter *is* the language of "off" (login.html gives :disabled
+   opacity .55). So the press is the label: the white goes to --line-warm, the
+   system's warm control colour, on the fill it already has. 16:1 — the same
+   order as the white it replaces. The physical half of the press is the 1px
+   depression in the reduced-motion block below. */
+.signin #submit:active {
+  background: var(--value); border-color: var(--value); color: var(--line-warm);
+}
+/* .signup is outlined on white, so it can press the ordinary way: one step down
+   the cream ramp to --cream-3, the fill .gr-button:hover uses, with the border
+   already at its darkest from :hover. #181818 on #ede6d6 is 14.1:1. */
+.signin .signup:active {
+  background: var(--cream-3); border-color: var(--ink-2); color: var(--ink);
+}
+
+/* ============================================================ breakpoints
+ *
+ * Every @media block in the file, and nothing else — all five breakpoints live
+ * here in one place, min-width ones ascending then max-width ones descending,
+ * which is the order the cascade needs:
+ *
+ *   1040px  the header search widens to 190px       ref §4 .searchBox__input--library
+ *   1200px  nav padding tightens 30px → 15px        ref §3 .siteHeader__topLevelLink
+ *   1220px  the header locks to its 1220px box      ref §3 .siteHeader__contents
+ *   ≤1000px the 300px rail drops below the main column
+ *   ≤780px  the header wraps and grid rows collapse to one column
+ *
+ * plus the one non-width query in the file, at the very bottom: the pressed
+ * state's 1px depression, which is motion and is therefore refused when the
+ * viewer has asked for less of it. It lives here because every @media block
+ * lives here, and it is last because it must win over the five above it.
+ *
+ * 1200 and 1220 are Goodreads' own numbers and are not rounded: the 20px
+ * between them is exactly one nav link's padding, and the header changes shape
+ * across it (a fluid bar becomes a fixed 1220px one), so the two are not the
+ * same breakpoint written twice.
+ *
+ * Nothing here introduces a value. Every declaration restates a property set
+ * above, at a width where the reference asks for a different one; the three
+ * exceptions are marked derived, and all three are for components Goodreads has
+ * no equivalent of.
+ *
+ * Deliberately absent: their @media (max-width:1199px){.siteHeader__topLine
+ * {position:relative;z-index:2}}. It exists to undo their position:fixed
+ * wrapper for the dropdown menus; this file's .bar is position:sticky at
+ * z-index:70, and copying that rule would drop the header behind the page it is
+ * meant to sit above.
+ */
+
+/* ===================================================== min-width: 1040px */
+/* ref §4 .searchBox__input--library — 155px by default, 190px from 1040px,
+   270px from 1220px. The app's search is a flex item rather than a
+   fixed-width input, so the step is taken on the wrapper.
+   RESOLVED SEAM: the header declares a definite `width: 155px` on this box, and
+   a definite width outranks a max-width — so a max-width-only step here left the
+   field at 155px at every viewport wider than the base, which is not the
+   reference's behaviour (their input really does widen, to 190px and then to
+   270px). Both properties are declared: the width is the step, the max-width is
+   the ceiling it may not pass. */
+@media (min-width: 1040px) {
+  .bar-search { width: 190px; max-width: 190px; }
+}
+
+/* ===================================================== min-width: 1200px */
+/* ref §3 .siteHeader__topLevelLink{padding:0 15px} — at 1200px the links give
+   back half their padding, which is what lets four of them plus the logo and
+   the account block fit inside the 1220px box without the search collapsing.
+   .siteHeader__logo drops its 16px right margin at the same breakpoint, so the
+   logo sits hard against the first link exactly as goodreads.com's does. */
+@media (min-width: 1200px) {
+  .nav a { padding: 0 15px; }
+  .wordmark { margin-right: 0; }
+}
+
+/* ===================================================== min-width: 1220px */
+/* ref §3 .siteHeader__contents{width:1220px} — above 1220px the header stops
+   being fluid and locks to its content box, while the page below stays at
+   --content (970px). That 125px inset per side is most of what makes the page
+   read as goodreads.com at a 1440px viewport. */
+@media (min-width: 1220px) {
+  .bar-inner { width: var(--header-max); }
+  .bar-search { width: 270px; max-width: 270px; }   /* the step carried to its ceiling — see the 1040px block */
+}
+
+/* ===================================================== max-width: 1000px */
+/* Below 1000px there is no room for a 300px rail beside a readable column, so
+   the page collapses to one column and the rail moves *under* the main
+   content — order:2 rather than source order, which would have put it first. */
+@media (max-width: 1000px) {
+  .page { grid-template-columns: minmax(0, 1fr); }
+  .rail { order: 2; }
+  /* The rail spans the page in this layout, so a detail right-aligned on a
+     700px row would sit 500px from the name it belongs to. The name column
+     stops growing at 14em instead — a fixed second column, which is the other
+     of the two shapes the brief allows for a name/detail pair — and the tracks
+     pack left, so the pair stays a pair and the row's hairline still runs the
+     full width. Above 1000px the rail is 300px and the 1fr column never
+     reaches 14em, so this cannot arise there. */
+  .svc-row { grid-template-columns: 9px minmax(0, 14em) minmax(0, max-content); }
+}
+
+/* ====================================================== max-width: 780px */
+/* The header at phone width. Goodreads deletes its navbar search below 767px
+   (ref §4 .searchBox--navbar{display:none}); the app keeps it, because the
+   search box is how a book is reached at all, and wraps the bar instead: logo
+   and account block on the first line, search on the second, nav links on a
+   third that scrolls sideways rather than breaking to two rows. */
+@media (max-width: 780px) {
+  .bar-inner { height: auto; flex-wrap: wrap; padding: 8px 12px; }
+  /* The wordmark is an SVG at a fixed 140×30 now (ref §3), so there is no type
+     step left to take here — the old `font-size:19px` retired with the text. */
+  .nav { order: 3; width: 100%; overflow-x: auto; }
+  .nav a { padding: 0 11px; font-size: 14px; line-height: 40px; }
+  .bar-search { order: 2; flex: 1; max-width: none; }
+
+  .page { padding: 12px; }
+
+  .bookpage { grid-template-columns: 1fr; }
+  .bookpage .cover-lg { width: 130px; }
+
+  /* 86px of a ~300px line is a third of it spent on the label "Genres seen",
+     so the label column collapses and the chips wrap under it as usual. */
+  .gline .lbl { min-width: 0; }
+
+  /* Four columns cannot survive a phone, and neither can a head row whose
+     labels no longer sit over their cells. The row goes to one column and the
+     head is dropped; each cell prints its own column name from `data-k`
+     instead, so "Fictional" still says it is the notebook and not the folder.
+     The count returns to the left edge with everything else — right-aligned it
+     would sit alone at the far edge of the cell, reading as a second value. */
+  .cat-row { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .cat-row.head { display: none; }
+  .cat-row > span:last-child { text-align: left; }
+  /* inline-block with a fixed width, not `content: attr(data-k) " "`: a
+     trailing space in generated content collapses against the element that
+     follows it, so "Notebook" ran straight into "Fictional". The box holds the
+     column open instead, and the value wraps under it the way .gline's does. */
+  .cat-row > span::before {
+    content: attr(data-k);
+    display: inline-block; min-width: 72px;
+    font-size: 12px; color: var(--muted);
+  }
+
+  /* Every row below is a grid that gives up its columns: label, value and
+     action stack instead of sitting side by side. */
+  .stage-row { grid-template-columns: 1fr; gap: 5px; }
+  .book-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .book-row .side { grid-column: 2; align-items: flex-start; }
+  .svc-row { grid-template-columns: 10px minmax(0, 1fr); }
+  /* derived: .svc-row has three children and only two columns here, so the
+     note would auto-place into the 10px dot column and render as a 10px
+     ellipsis. Same explicit placement .book-row .side takes above.
+     RESOLVED SEAM: `grid-column` is a property the row never declares above,
+     and a breakpoint is not supposed to introduce one — but a two-column row
+     cannot place three children without it, and the alternative is the smear
+     this rule exists to prevent. */
+  /* Left, not the right the desktop rule sets: the note has dropped onto its
+     own line under the name, so following it means hugging the left edge the
+     name starts at. Right-aligned here pushed "never checked" to the far edge
+     of a column the name no longer occupies, which read as a third thing in
+     the row rather than as the name's own state. */
+  .svc-row .note { grid-column: 2; text-align: left; }
+  .log .ev { grid-template-columns: 1fr; gap: 2px; }
+
+  /* Without this the third column kept its `minmax(0,1fr)` share of a width
+     that no longer exists, and the reason text rendered one character per
+     line — a vertical smear of letters down the page. */
+  .held-row { grid-template-columns: 1fr; gap: 3px; padding: 9px 15px; }
+}
+
+/* ============================================ the press (prefers-reduced-motion)
+ *
+ * The physical half of a press — 1px down, the way a key travels — and the only
+ * motion this file adds anywhere. It is refused outright when the viewer has
+ * asked for less motion, which is the correct default here rather than a
+ * formality: everything pressed in this app is pressable without it, because
+ * the colour change is on the control's own :active rule and is not in this
+ * block. A button that only moved would be a button whose press a
+ * reduced-motion viewer cannot see; a button that only changes colour is one
+ * whose press everybody can see, and the movement is the part they opted out
+ * of.
+ *
+ * Which controls move: the boxes. .tile, .health-pill, .chip.svc-tag,
+ * .sidebar-version and every <button>/.btn. They are free-standing keys on a
+ * surface, so 1px down reads as travel.
+ * Which controls deliberately do not: .svc-row, .book-row, .rail-check, .svc,
+ * .nav a, .filters button and .wordmark. These are full-bleed — a row that
+ * moves drags the panel's own edge with it, a nav link shares the header's
+ * 50px line with its neighbours, and a tab sits on the strip's baseline with
+ * its underline drawn against it: in each case the 1px would show up as a seam
+ * somewhere other than under the finger, which is a rendering fault rather than
+ * a press. They take the colour change, which is what the user actually asked
+ * for, and it is the same colour as everything else.
+ *
+ * 1px and no more: this is a press, not an animation, and at 2x it is two
+ * device pixels — enough to see, not enough to shift a label away from the
+ * text it sits beside or to catch the eye on a control the viewer is not
+ * touching.
+ */
+@media (prefers-reduced-motion: no-preference) {
+  button:active, .btn:active,
+  .tile:active, .health-pill:active,
+  .chip.svc-tag:active, .sidebar-version:active {
+    transform: translateY(1px);
+  }
+  /* ...except the filter tabs, which are <button>s and are named in the list
+     above as controls that must not move: a tab's 2px underline is drawn on its
+     own bottom edge against the strip's 1px baseline, so 1px of travel opens a
+     seam between the two — the one kind of movement in this file that would
+     read as a rendering fault rather than as a press. The tab's press is the
+     --line-warm fill declared with it, which is unmistakable on its own. */
+  .filters button:active { transform: none; }
 }
