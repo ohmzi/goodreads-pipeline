@@ -633,19 +633,19 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
    just ending. --bar is the same light fill the header bar uses (their own
    .siteHeader__topLine), so the two bookend the page in the same tone.
 
-   Two rows, not four columns: the three link groups are navigation and share
-   a row; the copyright and version link are meta, not navigation, so they
-   sit below a hairline instead of competing with nav for a fourth grid
-   column. A flat 4-column grid had no mobile step, so a short group
-   ("Session") was forced as wide as "Project" and "Sign in to Goodreads"
-   wrapped mid-phrase on a phone; splitting nav from meta lets each collapse
-   on its own at 780px (see the breakpoints section) instead of just
-   narrowing the same cramped columns. */
+   Two rows, not one flat grid: the link groups are navigation and share a
+   row; the copyright and version link are meta, not navigation, so they sit
+   below a hairline instead of competing with nav for a grid column. Splitting
+   nav from meta lets each collapse on its own at 780px (see the breakpoints
+   section) instead of both narrowing together.
+
+   No "Pages" group any more: it duplicated the header nav exactly, one
+   click further away, for no reason once the header itself always shows it. */
 .site-footer { background: var(--bar); padding: 28px 0 24px; margin-top: 24px; }
 .site-footer-inner { max-width: var(--header-max); margin: 0 auto; padding: 0 5px; }
 
 .site-footer-links {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gutter);
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gutter);
 }
 .site-footer h4 {
   margin: 0 0 10px; font: 700 12px/18px var(--sans);
