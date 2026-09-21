@@ -8,8 +8,10 @@
 # at runtime.
 #
 # Matching is substring, case-insensitive, and **longest needle first** — so
-# "science fiction" beats "fiction", and "space opera" beats "space", without
-# depending on the order things appear below. Add specific rules freely.
+# "space opera" beats "space", without depending on the order things appear
+# below. Add specific rules freely.
+#
+# The one exception is `precedence` below, which is checked before any needle.
 #
 # A book resolves to exactly ONE category: its genres are scanned in the order
 # Goodreads ranks them (most popular first) and the first genre that hits any
@@ -17,6 +19,33 @@
 # needs_review in the UI so you can fix it rather than have it misfiled.
 
 fallback: Fiction
+
+# Rules that win outright over the longest-needle scan below.
+#
+# The scan prefers the longest needle, which is right for most pairs — but it
+# is wrong once a book carries both a specific tag and the word "fiction":
+# Goodreads tags a historical novel ["Historical Fiction", "Fiction",
+# "Literary"], and "historical fiction" being longer than "fiction" filed it
+# under History. The library's rule is the opposite one: **anything that names
+# fiction is fiction**, however specific the longer rule is.
+#
+#   match:  words that claim the book for `category`. Whole words, not
+#           substrings — otherwise "fiction" matches inside "nonfiction".
+#   never:  strings removed from a genre before ANY matching happens, this
+#           block's or the scan's. "Non Fiction" is a word and a space, so a
+#           word-boundary test alone still reads the "fiction" in it; masking
+#           the phrase first is what keeps nonfiction books out of the Fiction
+#           folder.
+#
+# Checked per genre, not per book: a book tagged ["Fantasy", "Fiction"] is
+# still Fantasy, because the rule is about what a genre says, and its first
+# genre says Fantasy. A book whose genre list merely *contains* the bare tag
+# "Fiction" somewhere is not swept in — that is what would collapse the whole
+# Fantasy shelf (59 of 62 Fantasy books carry a bare "Fiction" tag).
+precedence:
+  - category: Fiction
+    match: [fiction]
+    never: [nonfiction, non fiction, non-fiction]
 
 categories:
   SciFi:
@@ -52,6 +81,14 @@ categories:
 
 genres:
   # --- speculative -----------------------------------------------------
+  # SHADOWED, not dead. `science fiction` and `speculative fiction` name
+  # fiction, so the `precedence` rule above claims them first and these two
+  # needles can no longer be reached through a genre: those books now file
+  # under Fiction and nothing new lands in /books/Space. The rules are left
+  # here on purpose, so the decision is one deletion (the precedence entry)
+  # away from being reversible. The rest of this block still works — a book
+  # tagged "space opera", "dystopia" or "cyberpunk" with no fiction-named
+  # genre still resolves SciFi.
   science fiction: SciFi
   speculative fiction: SciFi
   sci-fi: SciFi
@@ -139,6 +176,10 @@ genres:
   reference: How-To
 
   # --- general ---------------------------------------------------------
+  # `fiction` stays even though the `precedence` rule already claims the bare
+  # word: as a plain substring it is what catches the compounds a word-boundary
+  # test misses ("fanfiction", "autofiction"). The negated spellings cannot
+  # reach it — `never` removes them from the genre before this scan runs.
   fiction: Fiction
   literary fiction: Fiction
   classics: Fiction
