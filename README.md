@@ -193,22 +193,6 @@ eventually expires the UI says so and you do it again.
 | [API.md](docs/API.md) | The HTTP API |
 | [VERSION.md](docs/VERSION.md) | Release notes |
 
-## Layout
-
-```
-app/
-  main.py        FastAPI routes + UI hosting
-  pipeline.py    the scheduler and per-book stage machine
-  breaker.py     the per-service circuit breaker
-  stages/        classify, acquire_ebook, acquire_audiobook, place, index,
-                 notebook, verify, shelve — plus discover, the shelf reader
-  clients/       one thin wrapper per service
-  goodreads.py   session, shelf scraping, genre lookup, shelf writes
-  pathing.py     rename-not-copy, filename matching
-  cli.py         the maintenance subcommands
-  categories.yml the rule map
-```
-
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
