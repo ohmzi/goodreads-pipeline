@@ -91,20 +91,6 @@ cause rather than by book, with a suggested next step in plain language and a
 *Retry all* where retrying helps. A broken credential raises a banner on every
 page with a link straight to the fix.
 
-### The UI
-
-Served straight from `app/static/` — no framework, no build step, styled after
-goodreads.com, and usable on a phone.
-
-| View | What it is for |
-|---|---|
-| **Dashboard** | Counts at a glance, service health, run control, and the short list of things that actually need a human |
-| **My Books** | Filter by needs-attention / in progress / completed / genre review, or search. Each row shows the stage blocking it and why |
-| **Book detail** | Every stage with its status, attempt count, real error, and a Retry button — plus file paths and that book's log |
-| **Genres** | Where each category files to, which notebook it routes to, and the genres books actually arrived with |
-| **Services** | Per-service health, credential entry, Test buttons, and a way to clear a stuck hold |
-| **Activity** | The full event log |
-
 ### From the command line
 
 ```bash
