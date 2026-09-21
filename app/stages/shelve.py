@@ -118,7 +118,11 @@ def run(book: dict) -> models.StageResult:
             f"Goodreads request failed: {exc}", service=GOODREADS
         )
 
-    return models.StageResult.ok(f"moved to '{shelf}'", artifact=shelf)
+    # Named so `pipeline._advance` can feed it to `breaker.record_success`: an
+    # `ok` that does not name the service it used leaves the breaker's failure
+    # counter with no reset on healthy traffic.
+    return models.StageResult.ok(f"moved to '{shelf}'", artifact=shelf,
+                                 service=GOODREADS)
 
 
 def _goodreads_kind(exc: Exception) -> str:
