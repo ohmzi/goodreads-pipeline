@@ -2049,10 +2049,14 @@ a[target="_blank"]:active {
 
   /* Search open: the icon becomes the way back (tapping it again closes, via
      the same toggleSearch() call), the wordmark and status button step
-     aside, and the input takes the whole row. */
+     aside, and the input takes the whole row — the row's own side padding
+     shrinks too, not just the input's margin, so the box actually reaches
+     the screen edges instead of stopping at the 12px the row keeps for the
+     wordmark's benefit at every other time. */
+  .bar.search-open .bar-inner { padding-left: 8px; padding-right: 8px; }
   .bar.search-open .wordmark, .bar.search-open .menu-toggle { display: none; }
   .bar.search-open .bar-search {
-    display: flex; align-items: center; margin: 0 4px 0 8px;
+    display: flex; align-items: center; margin: 0 0 0 4px;
   }
   /* A single ring, not the border-colour change plus a separately offset
      outline stacking into the heavy double ring a phone's touch focus
