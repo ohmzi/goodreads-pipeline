@@ -109,6 +109,7 @@ class StageResult:
     #:   auth      — credentials rejected or missing; a human must fix Settings
     #:   network   — could not reach the service; transient, retry
     #:   server    — the service returned a 5xx; transient, retry
+    #:   busy      — the service refused work *now* (408/425/429); transient, retry
     #:   notfound  — the service says the thing does not exist; usually data
     #:   data      — nothing to work with (no release exists, format unusable)
     #:   ""        — unclassified
@@ -124,14 +125,96 @@ class StageResult:
     #: one service to name — those name the services in `detail` instead of
     #: picking one to blame.
     service: str = ""
+    #: Set only when the pipeline parked this stage because a *service* is
+    #: down, rather than because of anything about the book. The value is the
+    #: canonical service name; the row is written `blocked` and the breaker
+    #: releases it by itself once that service answers again.
+    #:
+    #: A separate field from `service` even though "blocked, and a service is
+    #: named" already reads as "blocked because of that service", because the
+    #: UI has to tell three different kinds of `blocked` apart: an outage hold
+    #: (this), an in-flight download (also `blocked`, but `service` is `''`),
+    #: and a one-off forgiven blip (carries `service`, no `held_by`, and ages
+    #: out on its own 24h clock). Empty is a real answer here too.
+    held_by: str = ""
+    #: Seconds the upstream asked us to wait, when it said (`Retry-After`).
+    #: Only a rate-limited service ever sends one, and it is the one piece of
+    #: evidence about *when* to look again that we do not have to guess.
+    retry_after: float | None = None
+    #: True when the stage reached the service this result is about and got an
+    #: answer out of it, whatever that answer was.
+    #:
+    #: This exists because `kind` cannot carry it, and reading it off `kind`
+    #: is what produced F1's false negative. `data` is returned by two
+    #: situations that are opposite in exactly this respect: the free-space
+    #: guard in `acquire._queue` returns it *before* the dial (our disk refused
+    #: the book; the service was never asked) and a successful search that
+    #: finds no release returns it *after* one (the service answered, and the
+    #: answer was "nothing"). A breaker that reads the first as unanswered —
+    #: correct, and the whole of F1's fix — therefore reads the second as
+    #: unanswered too, and a half-open probe against a perfectly healthy
+    #: service re-opens the breaker, forever: measured at 20 cooldowns with 25
+    #: successful dials, state still open, 5 books held with no reset path.
+    #: In a real library that is not exotic, because "no audiobook exists in
+    #: any configured source" is the dominant outstanding category, so the
+    #: books that lead the rotation are exactly the ones that wedge it.
+    #:
+    #: Set by the stage that dialed, on the branch that returned after the
+    #: service replied. Read by `breaker.probe_verdict`, which is the only
+    #: place the distinction is needed: it is a fact about one run against one
+    #: service, not about the book, so nothing persists it and `failure_kind`
+    #: on the row stays what it always was (`data` for both cases) — the
+    #: issues panel groups on that, and a new *kind* would have split "no
+    #: audiobook exists" into two groups and dragged `cli`'s `failure_kind`
+    #: queries with it.
+    #:
+    #: False is the safe default in both directions: a result that never
+    #: dialed must not claim one (the disk-space guard, a stage that raised
+    #: before reaching out, `_advance`'s own `unhandled error` synthesis), and
+    #: a dial that happened but was not flagged just leaves the probe
+    #: unanswered, which costs one cooldown rather than a wedge.
+    answered: bool = False
+    #: True when whoever built this hold has already fed the failure behind it
+    #: to `breaker.record_failure`.
+    #:
+    #: The pipeline used to infer this from `kind` being empty, on the grounds
+    #: that `breaker.hold()` clears `kind` and so only a stage that went
+    #: through it could be holding with `''`. That inference is about the
+    #: wrapper rather than about the fact, and it fails in the direction that
+    #: loses evidence: a stage that holds without recording is read as having
+    #: recorded, and the upstream's own words never reach the breaker's one
+    #: line for that cooldown. `_advance` reads this instead — see its
+    #: `refused_probe` block — and records on the stage's behalf when it is
+    #: False, which is the belt the original comment claimed to be.
+    recorded: bool = False
 
     @classmethod
-    def ok(cls, detail: str = "", artifact: str = "") -> "StageResult":
-        return cls(OK, detail, artifact)
+    def ok(cls, detail: str = "", artifact: str = "",
+           service: str = "") -> "StageResult":
+        """A stage succeeded. `service` is the one it just used, where it has one.
+
+        Naming the service is what makes `breaker.record_success` reachable:
+        `pipeline._advance` feeds the breaker from an `ok` that names a service,
+        and if none ever does, a service's failure counter has no reset on
+        healthy traffic at all — three unrelated transient failures, however far
+        apart, were enough to hold it. Fan-out stages (`index`, `verify`) and
+        local ones (`classify`, `place`) genuinely have no single service and
+        leave this empty, exactly as they do for a failure.
+        """
+        return cls(OK, detail, artifact, service=service)
 
     @classmethod
-    def failed(cls, detail: str, kind: str = "", service: str = "") -> "StageResult":
-        return cls(FAILED, detail, kind=kind, service=service)
+    def failed(cls, detail: str, kind: str = "", service: str = "",
+               retry_after: float | None = None,
+               answered: bool = False) -> "StageResult":
+        """A stage that did not do its job. `answered` says whether it asked.
+
+        A failed result can still be the service's own answer — "no release
+        exists" is the case this argument exists for — and the breaker reads
+        that when a half-open probe comes back this way. See the field.
+        """
+        return cls(FAILED, detail, kind=kind, service=service,
+                   retry_after=retry_after, answered=answered)
 
     @classmethod
     def skipped(cls, detail: str = "") -> "StageResult":
@@ -140,6 +223,19 @@ class StageResult:
     @classmethod
     def blocked(cls, detail: str, service: str = "") -> "StageResult":
         return cls(BLOCKED, detail, service=service)
+
+    @classmethod
+    def held(cls, detail: str, service: str,
+             recorded: bool = False) -> "StageResult":
+        """Blocked because the *service* is down, not because of this book.
+
+        `recorded` is the holder saying it has already told the breaker about
+        the failure this hold stands in for; see the field. It defaults to
+        False because a hold built without saying so is the case the pipeline
+        has to act on.
+        """
+        return cls(BLOCKED, detail, service=service, held_by=service,
+                   recorded=recorded)
 
     @property
     def terminal(self) -> bool:
