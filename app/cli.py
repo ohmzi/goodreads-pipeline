@@ -3,11 +3,15 @@
     python -m app.cli audit              # read-only; changes nothing
     python -m app.cli rename             # dry run; prints what it would do
     python -m app.cli rename --apply     # actually does it
+    python -m app.cli reclassify         # dry run; prints what it would do
+    python -m app.cli reclassify --apply # re-files the library to match
 
-Both default to doing nothing. The audiobook folder on this host is genuinely
-messy — flat files, `__yEnc` suffixes, `-6a6dea` disambiguators — and a
-half-applied bulk rename would be worse than the mess. So `rename` proposes,
-you read the list, and only `--apply` touches the disk.
+Everything that touches the disk defaults to doing nothing. The audiobook
+folder on this host is genuinely messy — flat files, `__yEnc` suffixes,
+`-6a6dea` disambiguators — and a half-applied bulk rename would be worse than
+the mess. So these commands propose, you read the list, and only `--apply`
+touches the disk. `reclassify` renames books inside a real library, so it is
+held to the same rule.
 """
 
 from __future__ import annotations
@@ -17,12 +21,18 @@ import getpass
 import hashlib
 import re
 import sys
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from .config import settings
 from .db import db
-from .pathing import AUDIO_EXTS, is_junk, is_media_file, sanitize_component
+from .pathing import (
+    AUDIO_EXTS,
+    is_junk,
+    is_media_file,
+    move_into_place,
+    sanitize_component,
+)
 
 CHUNK = 1024 * 1024
 
@@ -704,6 +714,307 @@ def cmd_backfill_genres(args: argparse.Namespace) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------
+# reclassify
+# --------------------------------------------------------------------------
+#: What a re-classify decided about one book's ebook. The names are also what
+#: the dry run prints, so they are words rather than letters.
+MOVE = "move"              # the file is renamed into the new category's folder
+IN_PLACE = "in place"      # the category moved, the file did not need to
+NOT_PLACED = "not placed"  # nothing on disk yet; only the record changes
+STALE = "missing"          # a path is recorded and there is no file behind it
+OUTSIDE = "outside"        # recorded somewhere other than the book library
+
+
+def cmd_reclassify(args: argparse.Namespace) -> int:
+    """Apply the current rules to the whole library, and move the files.
+
+    For a taxonomy change: `categories.yml` was edited and books already on
+    disk were filed by the old rules. The pipeline's own answer to "the
+    category changed" is to reset `place` and let a sweep redo it, and that
+    does not work here. `place._already_placed_ebook` searches only the *new*
+    category's folder, so a book sitting in the old one looks like nothing was
+    ever downloaded: the stage blocks, retries forever, and holds index,
+    notebook, verify and shelve behind it. So the file is moved here instead.
+
+    Order is the whole safety argument, per book:
+
+      1. rename the ebook — atomic, and `move_into_place` refuses to copy, so
+         there is never a second copy of a book;
+      2. rewrite the path recorded for `place`;
+      3. write the new category;
+      4. reset the stages that hold the old path — never `place` itself.
+
+    A run interrupted anywhere leaves a state the next run reads back
+    correctly, because the plan is rebuilt from both the recorded path and the
+    destination. That is what makes this resumable, and idempotent: a second
+    run over a finished library has nothing to do. A book that cannot be moved
+    is reported and its record is left alone, so it is still findable under
+    the category it was filed by.
+
+    What it deliberately does not touch:
+      * `place`. Resetting it is the bug this command exists to avoid.
+      * audiobooks. They are filed under `Author/Title` with no category in
+        the path, so there is nothing to re-file; their books' categories
+        change, their files do not.
+      * books with no file on disk — reported, not silently skipped.
+
+    Genres are taken as stored. This command does not talk to Goodreads; that
+    is `backfill-genres`' job, and doing it here would turn a re-file into a
+    network crawl of the shelf.
+    """
+    import json
+
+    from .stages.place import placed_paths    # the record of where a book sits
+
+    rules = settings.load_categories()
+    rows = db().query(
+        "SELECT id, title, author, category, needs_review, genres FROM books ORDER BY id"
+    )
+
+    print(f"\nRules: {settings.categories_path}")
+    print(f"{'Applying' if args.apply else 'Dry run — nothing will change'}"
+          f" — {len(rows)} book(s)")
+    if not rows:
+        print("\n  no books in the library\n")
+        return 0
+
+    plans: list[dict] = []
+    flags: list[dict] = []
+    for row in rows:
+        category, needs_review = _resolve_for_row(row, rules)
+        if category == str(row["category"] or ""):
+            # Recompute the flag even when the category stands still: a book
+            # that used to fall through to the fallback and now matches a real
+            # rule keeps a stale needs_review otherwise, and the review pile
+            # never drains. Same reason `backfill-genres` recomputes it.
+            if bool(needs_review) != bool(row["needs_review"]):
+                flags.append({"row": row, "needs_review": needs_review})
+            continue
+        plans.append(_plan_refile(row, category, needs_review))
+
+    _report_reclassify(plans, flags)
+    if not args.apply:
+        print("\nDry run. Nothing was changed. Re-run with --apply to do it.\n")
+        return 0
+
+    # --- apply ----------------------------------------------------------
+    print("\nApplying...\n")
+    applied = moved = failed = reset = 0
+    husks: list[str] = []
+    for plan in plans:
+        row = plan["row"]
+        book_id = int(row["id"])
+        kind, destination = plan["kind"], plan["path"]
+
+        if kind in (STALE, OUTSIDE):
+            # Refusing these two is what keeps the promise that the row and
+            # the disk agree: the category is only written once the file is
+            # known to be where the new category says it is.
+            print(f"  --  {row['title'][:44]:46} {kind}: {plan['path']}")
+            failed += 1
+            continue
+        try:
+            if kind == MOVE:
+                destination = move_into_place(plan["from"], plan["to"])
+                moved += 1
+            if destination is not None:
+                placed = placed_paths(book_id)
+                if placed:
+                    # Rewrite the path before the category, so an interruption
+                    # between the two is a state the next run recognises (the
+                    # record points into the new folder, the category is still
+                    # old) rather than one it has to guess at.
+                    placed["ebook"] = str(destination)
+                    db().set_output(book_id, "place", json.dumps(placed))
+            db().set_category(book_id, plan["category"], needs_review=plan["needs_review"])
+        except (OSError, RuntimeError) as exc:
+            # Nothing was written for this book: the rename either happened or
+            # it did not, and the row is untouched either way. The next run
+            # picks the move back up.
+            print(f"  !!  {row['title'][:44]:46} {exc}")
+            failed += 1
+            continue
+
+        if kind == MOVE:
+            # Only the file moves, so the folder it was in can be left as an
+            # empty husk in the old category. `place` tidies those away in
+            # staging; same tidying here, and anything left (a cover, an .opf
+            # beside the epub) is named rather than removed.
+            husk = plan["from"].parent
+            if husk != settings.books_root and husk.is_dir():
+                try:
+                    husk.rmdir()
+                except OSError:
+                    husks.append(str(husk))
+        if plan["reset"]:
+            # index, notebook and verify all hold the old path: the three
+            # indexers need a rescan, Open Notebook needs a source for the new
+            # path in the new notebook, and verification re-checks both. This
+            # resets everything downstream of `index` with them — `shelve`
+            # included — and that is safe: a shelf is chosen by which formats
+            # landed, which a re-file does not change, so it re-runs and
+            # re-adds the book to the shelf it is already on.
+            db().reset_stage(book_id, "index")
+            reset += 1
+        db().log(f"reclassify: {plan['was']} -> {plan['category']}", book_id=book_id)
+        applied += 1
+
+    db().log(
+        f"reclassify: {applied} book(s) re-categorised, {moved} file(s) moved"
+        + (f", {failed} left alone" if failed else "")
+    )
+
+    for flag in flags:
+        db().set_category(
+            int(flag["row"]["id"]), str(flag["row"]["category"] or ""),
+            needs_review=flag["needs_review"],
+        )
+
+    print(f"\n  {applied} book(s) re-categorised, {moved} file(s) moved, "
+          f"{failed} left alone")
+    if flags:
+        print(f"  {len(flags)} review flag(s) updated")
+    if reset:
+        print(f"  index/notebook/verify reset for {reset} book(s) whose folder "
+              f"or notebook changed — the next sweep redoes them")
+    if husks:
+        print(f"  {len(husks)} old folder(s) kept, they still hold something "
+              f"beside the ebook:")
+        for husk in husks[:8]:
+            print(f"    {husk}")
+        if len(husks) > 8:
+            print(f"    ... and {len(husks) - 8} more")
+    print()
+    return 0
+
+
+def _resolve_for_row(row, rules) -> tuple[str, bool]:
+    """The category today's rules give this book, exactly as the stage would.
+
+    Mirrors `classify.run` including the title fallback, so that letting the
+    scheduler work and running this command cannot produce two different
+    answers for the same book.
+    """
+    import json
+
+    from .stages import classify
+
+    genres = json.loads(row["genres"] or "[]")
+    category, needs_review = classify.resolve_category(genres, rules)
+    if needs_review:
+        from_title = classify.resolve_from_title(str(row["title"] or ""), rules)
+        if from_title:
+            return from_title, False
+    return category, needs_review
+
+
+def _plan_refile(row, new_category: str, needs_review: bool) -> dict:
+    """What has to happen to this book's ebook for `new_category`.
+
+    Uses the pipeline's own two pieces: `classify.destination_for` for the
+    folder, and `pathing.move_into_place` for getting there — the same pair
+    `place.py` uses when it re-files a book whose embedded metadata upgraded
+    its category. There is no second mover here on purpose.
+    """
+    from .stages.classify import destination_for
+    from .stages.place import placed_paths
+
+    book_id = int(row["id"])
+    old_category = str(row["category"] or "")
+    old_folder, old_notebook = destination_for(old_category)
+    new_folder, new_notebook = destination_for(new_category)
+
+    # Only the services that key off the category need redoing, and only when
+    # something is actually placed. Fantasy and Fiction share both their folder
+    # and their notebook, so a book moving between those two has nothing for
+    # Kavita or Open Notebook to notice; a book with nothing downloaded has
+    # nothing in a service to correct either.
+    moved_destination = (old_folder, old_notebook) != (new_folder, new_notebook)
+
+    kind, path, source, target = NOT_PLACED, None, None, None
+    recorded = placed_paths(book_id).get("ebook") or ""
+    if recorded:
+        current = Path(recorded)
+        destination = settings.books_root / new_folder / current.parent.name / current.name
+        if destination == current:
+            # Either the two categories share a folder, or a previous run got
+            # as far as the rename and no further. Both mean: nothing to move.
+            kind, path = IN_PLACE, current
+        elif not current.is_relative_to(settings.books_root):
+            # Never expected — `place` only ever files inside the library — but
+            # a re-filer must not rename something it does not own, and an
+            # audiobook path is the thing that would hurt most.
+            kind, path = OUTSIDE, current
+        elif current.exists():
+            kind, path, source, target = MOVE, destination, current, destination
+        elif destination.exists():
+            # The file is already in the new folder and the record has not
+            # caught up: a run that died between the rename and the writes.
+            # Finish it.
+            kind, path = IN_PLACE, destination
+        else:
+            kind, path = STALE, current
+
+    return {
+        "row": row,
+        "was": old_category,
+        "category": new_category,
+        "needs_review": needs_review,
+        "kind": kind,
+        "path": path,
+        "from": source,
+        "to": target,
+        "reset": moved_destination and kind in (MOVE, IN_PLACE),
+    }
+
+
+def _report_reclassify(plans: list[dict], flags: list[dict]) -> None:
+    """Everything the dry run and the apply both need to say up front."""
+    if not plans and not flags:
+        print("\n  nothing to do — every book already matches the current rules")
+        return
+
+    if plans:
+        moves = Counter((p["was"] or "(none)", p["category"]) for p in plans if p["kind"] == MOVE)
+        transitions = Counter((p["was"] or "(none)", p["category"]) for p in plans)
+        kinds = Counter(p["kind"] for p in plans)
+
+        print(f"\n=== {len(plans)} book(s) change category ===\n")
+        print("  by transition")
+        for (was, now), count in transitions.most_common():
+            print(f"    {was:<10} -> {now:<10} {count:4} book(s), "
+                  f"{moves[(was, now)]} file move(s)")
+        print("\n  by what happens to the file: "
+              + ", ".join(f"{n} {k}" for k, n in kinds.most_common()))
+        print("  (audiobooks are not partitioned by category — no audiobook "
+              "path is touched)")
+
+        print("\n  every book, and what it needs:")
+        for plan in plans:
+            print(f"    {plan['kind']:<10} {plan['was'] or '(none)'} -> "
+                  f"{plan['category']}  {str(plan['row']['title'])[:44]}")
+            if plan["kind"] == MOVE:
+                print(f"        from {plan['from']}")
+                print(f"        to   {plan['to']}")
+            elif plan["kind"] == IN_PLACE:
+                print(f"        already at {plan['path']}")
+            elif plan["kind"] == STALE:
+                print(f"        no file at {plan['path']} — reported, left alone")
+            elif plan["kind"] == OUTSIDE:
+                print(f"        {plan['path']} is outside {settings.books_root} — left alone")
+            elif plan["kind"] == NOT_PLACED:
+                print("        nothing downloaded yet — only the record changes")
+
+    if flags:
+        print(f"\n=== {len(flags)} book(s) keep their category but their review flag moves ===")
+        for flag in flags[:8]:
+            print(f"  needs_review -> {int(flag['needs_review'])}  "
+                  f"{str(flag['row']['title'])[:48]}")
+        if len(flags) > 8:
+            print(f"  ... and {len(flags) - 8} more")
+
+
 def cmd_users(args: argparse.Namespace) -> int:
     names = db().list_users()
     if not names:
@@ -759,6 +1070,17 @@ def main(argv: list[str] | None = None) -> int:
         help="re-fetch missing genres and re-categorise (fixes an all-fallback shelf)",
     )
     backfill.set_defaults(func=cmd_backfill_genres)
+
+    reclass = sub.add_parser(
+        "reclassify",
+        help="re-run classification over every book, moving files to match "
+             "(dry run by default)",
+    )
+    reclass.add_argument(
+        "--apply", action="store_true",
+        help="actually re-categorise and move the files to the new folders",
+    )
+    reclass.set_defaults(func=cmd_reclassify)
 
     report = sub.add_parser("report", help="what completed, what failed, and why")
     report.add_argument("--failed-only", action="store_true", help="show only failures")
