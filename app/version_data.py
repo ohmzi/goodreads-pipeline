@@ -8,6 +8,42 @@ from __future__ import annotations
 
 VERSION_HISTORY: list[dict] = [
     {
+        "version": "1.2",
+        "date": "2026-09-21",
+        "summary": (
+            "A native-app-style mobile header with an animated search, a "
+            "cohesive desktop header, and a stolen-focus fix."
+        ),
+        "sections": [
+            {
+                "heading": "Mobile header",
+                "items": [
+                    "The service status/run control rail is dashboard-only now; Run control's own controls (sweep now, check shelf, auto-shelve) also appear inline on the Activity page, above its log.",
+                    "The header at phone width follows their own native app rather than their desktop navbar: a bare search icon on the left, the wordmark truly centred, and a status/account control on the right standing in for their avatar. Nav tabs share the row exactly five ways instead of scrolling sideways to fit.",
+                    "Tapping the search icon slides the input open left to right as a real animated overlay, instead of an instant, jarring swap that also used to nudge the nav row underneath it.",
+                    "The account dropdown (service status, sign out) closes on an outside tap, Escape, or navigating via a link inside it.",
+                ],
+            },
+            {
+                "heading": "Desktop header",
+                "items": [
+                    "The search box, the health pill and Sign out no longer read as three different controls. All three now share one visual language with the nav tabs: the search box is a full pill matching the mobile one exactly, and the health pill and Sign out take the nav links' own geometry and hover fill instead of a separate cream chip and a bare teal link. Sign out keeps its own colour — the app's error red, not the nav's brown ink — since it ends the session rather than taking you anywhere.",
+                ],
+            },
+            {
+                "heading": "Fixes",
+                "items": [
+                    "A search keystroke on any page but My Books used to steal keyboard focus and drop it on the page title, ending the keystroke — typing more than one character before My Books loaded was not possible. Fixed.",
+                    "The category and status filter tabs (My Books, Genres) are bordered pills now instead of goodreads.com's own flat underlined tabs, which stopped being legible once a dynamic category list ran past the two or three tabs the real site ever draws there.",
+                    "A book row's stage chips no longer sit flush against the detail message below them with no gap.",
+                    "The app-wide footer dropped its \"Pages\" column, which only duplicated the always-visible header nav one click further away.",
+                    "Pinch and double-tap zoom are disabled everywhere, so the mobile layout cannot be pinched out of the proportions it was built for.",
+                    "The dashboard's version pill is its own small card now, separate from Run control, since it is metadata about the running instance and not a control.",
+                ],
+            },
+        ],
+    },
+    {
         "version": "1.1",
         "date": "2026-09-21",
         "summary": (

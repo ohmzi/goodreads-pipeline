@@ -171,8 +171,8 @@ outcomes are logged: failures at `warning`, successes at `info`.
 | Method | Path | Session | Request | Returns |
 |---|---|---|---|---|
 | GET | `/api/state` | yes | — | The whole dashboard payload — see below |
-| GET | `/api/version` | yes | — | `{"asset_version": "<10 hex chars>", "app": "goodreads", "version": "1.1.0"}` |
-| GET | `/api/version/history` | yes | — | `{"current": "1.1.0", "releases": [{"version": "1.1", "date": "2026-09-20", "summary": str, "sections": [{"heading": str, "items": [str]}]}]}` — newest first, transcribed by hand from docs/VERSION.md (`app/version_data.py`) |
+| GET | `/api/version` | yes | — | `{"asset_version": "<10 hex chars>", "app": "goodreads", "version": "1.2.0"}` |
+| GET | `/api/version/history` | yes | — | `{"current": "1.2.0", "releases": [{"version": "1.2", "date": "2026-09-21", "summary": str, "sections": [{"heading": str, "items": [str]}]}]}` — newest first, transcribed by hand from docs/VERSION.md (`app/version_data.py`) |
 | GET | `/api/issues` | yes | — | `{"groups": [...], "counts": {...}, "needs_review": [...]}` |
 | GET | `/api/categories` | yes | — | `{"categories": {...}, "fallback": ...}` — `app/categories.yml` verbatim (`app/main.py:900-904`) |
 
