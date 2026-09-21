@@ -26,9 +26,9 @@ stored for diagnostics only — no pipeline stage calls either directly
 ## The pipeline
 
 The unit of work is a book, and a book is a row of independent stages. Redrawn
-from README.md with two additions: `discover`, which the README folds into its
-first line, and `verify`, which sits in the stage tuple between `notebook` and
-`shelve` and is the reason `shelve` can be trusted:
+from the README's chain diagram with two additions: `discover`, which that
+diagram folds into its first line, and `verify`, which sits in the stage tuple
+between `notebook` and `shelve` and is the reason `shelve` can be trusted:
 
 ```
 Goodreads to-read

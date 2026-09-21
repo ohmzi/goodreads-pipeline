@@ -186,7 +186,7 @@ hard failure, which is the intended behaviour.
 sign-in page reloads as if nothing happened — no error, because from the
 server's perspective no request ever arrived with a session. Turn it on only
 once goodreads is reachable over HTTPS exclusively (`app/main.py:194-198`,
-`README.md`).
+[SECURITY.md](SECURITY.md)).
 
 **`TRUST_PROXY=1` without a proxy hands out a rate-limit bypass.** Client
 addresses for login throttling come from `X-Forwarded-For` when this is on

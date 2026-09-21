@@ -1,7 +1,8 @@
 # Security
 
 Written for someone deciding whether to run this. It states the posture as it
-is, including the parts that are weaker than the README's summary implies.
+is, including the parts that are weaker than the README's summary of it
+implies. This file is the authority; the README only points here.
 
 ## What the service is trusted with
 
@@ -238,8 +239,8 @@ generated password is printed once.
 
 ## Known limits
 
-Reproduced from README rather than softened, with corrections where the source
-has moved on.
+Stated rather than softened, and kept here in full rather than summarised
+anywhere else.
 
 - **The session cookie is a bearer token.** Anyone who reads it is you until it
   expires. There is no per-session revocation: there is no way to kill one
