@@ -8,88 +8,116 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&family=Merriweather:wght@400;700&display=swap">
 <link rel="stylesheet" href="/static/app.css?v=__ASSET_VERSION__">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#128218;</text></svg>">
+<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
 <style>
   /* This is the one screen that copies goodreads.com's own sign-in page
      rather than the app shell: a white page, a narrow centred column, no
      card, no toolbar, no cream. Everything behind it is brown-on-cream; this
      page is what you meet first, so it is shaped like the page it stands in
-     for. Only the pieces Goodreads needs and this app does not are missing —
-     there is no account to create and no reset email to send, so neither is
-     drawn here pretending to work. */
+     for.
 
+     Geometry is the measured real page (see the measurements this was built
+     against): a 350px column, the wordmark 29px below the top of the viewport,
+     a 38px serif heading, 37px pill inputs and a 39px pill button, then the
+     tail the real page has — legal paragraph, keep-signed-in row, "New to
+     Goodreads?" rule, an outlined Sign up pill, footer links and the
+     copyright line.
+
+     Three pieces of the real page have nothing behind them here, and none of
+     them pretends otherwise:
+       - Sign up: there is no registration. The button is real, and pressing it
+         says where accounts actually come from.
+       - Terms of Service / Privacy Policy / the footer links: no such pages
+         exist, so they are styled as the real ones are — same ink, no
+         underline — but they are text, not anchors, so nothing 404s.
+       - The real "Details" popover explains the keep-signed-in cookie. Ours
+         does too, for the cookie this app actually sets. */
+
+  /* ---- frame ---- */
   body {
     background: var(--paper);
     min-height: 100vh;
-    padding: 86px 16px 48px;
+    padding: 28px 16px 48px;
   }
 
-  .signin { width: min(268px, 100%); margin: 0 auto; }
+  .signin { width: min(350px, 100%); margin: 0 auto; }
 
-  /* Their logo: lowercase serif, set solid, one colour. Merriweather 700 at a
-     little negative tracking is the closest face in the stack already loaded. */
+  /* ---- wordmark and heading ---------------------------------------------
+     Theirs is an SVG; this is the closest the loaded stack gets in type. Both
+     are set in the light face, not the bold: at 42px Merriweather 400 draws
+     the wordmark 207 x 45 against the measured 205 x 46, and 38px gives the
+     heading 125px of ink against 129 — while the bold face sat 10% heavier
+     than the real thing in both. */
   .logo {
     display: block; text-align: center;
-    font-family: var(--serif); font-weight: 700;
-    font-size: 34px; line-height: 1; letter-spacing: -.6px;
+    font-family: var(--serif); font-weight: 400;
+    font-size: 42px; line-height: 1; letter-spacing: 0;
     color: var(--ink);
   }
   h1 {
-    font-family: var(--serif); font-weight: 700;
-    font-size: 27px; line-height: 1.2; text-align: center;
-    color: var(--ink); margin: 16px 0 22px;
+    font-family: var(--serif); font-weight: 400;
+    font-size: 38px; line-height: 1; text-align: center;
+    color: var(--ink); margin: 23px 0 18px;
   }
 
   /* ---- fields ---- */
-  .lbl { display: block; font-size: 13px; color: var(--ink-2); margin-bottom: 5px; }
-  .fld { display: block; margin-bottom: 14px; }
-  .row {
-    display: flex; align-items: baseline; justify-content: space-between;
-    margin-bottom: 5px;
+  .lbl {
+    display: block; font-size: 14px; font-weight: 400; line-height: 1.2;
+    color: var(--ink-2); margin-bottom: 13px;
   }
-  .row .lbl { margin-bottom: 0; }
+  .fld { display: block; margin-bottom: 12px; }
+  .pwrow {
+    display: flex; align-items: baseline; justify-content: space-between;
+    line-height: 1.2; margin-bottom: 15px;
+  }
+  .pwrow .lbl { margin-bottom: 0; }
 
+  /* 350 x 37, 1px grey, near-pill: radius is very nearly half the height. */
   #username, #password {
-    width: 100%; font-size: 14px; color: var(--ink);
-    background: var(--paper); border: 1px solid #ccc; border-radius: 6px;
-    padding: 8px 11px;
+    width: 100%; height: 37px;
+    font-family: var(--sans); font-size: 14px; color: var(--ink);
+    background: var(--paper); border: 1px solid var(--faint); border-radius: 18px;
+    padding: 0 12px;
     transition: border-color .15s ease, box-shadow .15s ease;
   }
   /* Beats app.css's teal input focus — this page is monochrome, so focus is
-     the border darkening plus a soft ring rather than an accent colour. */
+     the border darkening plus a soft ring rather than an accent colour. The
+     ring is mixed from --ink so no second palette value is invented. */
   #username:focus, #password:focus {
     outline: none; border-color: var(--ink-2);
-    box-shadow: 0 0 0 3px rgba(24,24,24,.12);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink) 12%, transparent);
   }
 
   /* ---- password assistance: the slot Goodreads fills with a reset link.
      There is no reset here, so it opens the one thing that does work. ---- */
-  .assist {
-    background: none; border: none; padding: 0; font: inherit;
-    font-size: 12.5px; color: var(--teal); cursor: pointer;
+  .assist, .details {
+    background: none; border: 0; padding: 0; font: inherit;
+    font-size: 14px; color: var(--teal); cursor: pointer;
   }
-  .assist:hover { color: var(--teal-dark); text-decoration: underline; }
-  .assist:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-  .assist-body {
+  .assist:hover, .details:hover { color: var(--teal-dark); text-decoration: underline; }
+  .assist:focus-visible, .details:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .assist-body, .details-body {
     margin: 10px 0 0; padding: 9px 11px;
     background: var(--cream); border: 1px solid var(--line-warm); border-radius: 6px;
     font-size: 12.5px; line-height: 1.5; color: var(--muted);
   }
-  .assist-body code {
+  .assist-body code, .details-body code {
     display: block; margin-top: 6px;
     font-family: var(--mono); font-size: 12px; color: var(--ink-2);
     overflow-wrap: anywhere;
   }
 
-  /* ---- the button: solid black, full width, as theirs ---- */
+  /* ---- the button: solid black, full width, as theirs. --paper for the label
+     is the token that is #ffffff, rather than a second white. ---- */
   #submit {
-    width: 100%; margin-top: 20px; padding: 11px 12px;
-    font: inherit; font-size: 14.5px; font-weight: 700; letter-spacing: .2px;
-    color: #fff; background: var(--ink); border: 1px solid var(--ink);
-    border-radius: 6px; cursor: pointer;
+    width: 100%; height: 39px; margin-top: 37px;
+    font-family: var(--sans); font-size: 14px; font-weight: 700; letter-spacing: .2px;
+    color: var(--paper); background: var(--ink); border: 1px solid var(--ink);
+    border-radius: 20px; cursor: pointer;
     transition: background-color .15s ease, border-color .15s ease;
   }
-  #submit:hover { background: #000; border-color: #000; color: #fff; }
+  /* --value is the palette's #000000; theirs darkens on hover too. */
+  #submit:hover { background: var(--value); border-color: var(--value); color: var(--paper); }
   #submit:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
   #submit:disabled { opacity: .55; cursor: default; }
 
@@ -98,17 +126,67 @@
   }
   #error:empty { display: none; }
 
-  .note { margin: 16px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--muted); }
+  /* ---- legal paragraph: 15px on a 23px line, left aligned, wrapping at the
+     column edge just as theirs does. Its two links are the same ink as the body
+     text and underlined — which is how the real page draws them, and what the
+     two spans here copy. They carry no href: those pages do not exist. ---- */
+  .legal {
+    margin: 30px 0 0;
+    font-size: 15px; line-height: 23px; color: var(--ink);
+  }
+  .legal-link { text-decoration: underline; }
 
-  /* Their "New to Goodreads?" rule, with the one thing this page can honestly
-     say in that slot. */
-  .divider { display: flex; align-items: center; gap: 12px; margin: 30px 0 14px; }
-  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-  .divider span { font-size: 13px; color: var(--ink-2); }
+  /* ---- keep me signed in ---------------------------------------------------
+     Starts 6px in from the column edge, as theirs does, with a 13px box on the
+     text's centre line. The checkbox is real: the form posts it and the server
+     issues a 12-hour session instead of the full one. */
+  .keep {
+    display: flex; align-items: center; gap: 6px;
+    padding-left: 6px; margin: 17px 0 0;
+    font-size: 14px; color: var(--ink);
+  }
+  .keep input[type="checkbox"] {
+    width: 13px; height: 13px; margin: 0; flex: none; accent-color: var(--ink);
+  }
+  .keep label { cursor: pointer; }
 
-  .fine { margin: 0; text-align: center; font-size: 11.5px; line-height: 1.5; color: var(--ghost); }
+  /* ---- "New to Goodreads?" rule: two 1px hairlines either side of the words,
+     ~7px of air between rule and text. ---- */
+  .divider { display: flex; align-items: center; gap: 7px; margin: 52px 0 0; }
+  .divider::before, .divider::after {
+    content: ""; flex: 1; height: 1px; background: var(--line);
+  }
+  .divider span { font-size: 12px; line-height: 1; color: var(--ink-2); }
 
-  @media (max-height: 760px) { body { padding-top: 40px; } }
+  /* ---- Sign up: outlined, not filled, same pill as the button above ---- */
+  .signup {
+    display: block; width: 100%; height: 40px; margin: 16px 0 0;
+    font-family: var(--sans); font-size: 14px; font-weight: 400;
+    color: var(--ink); background: var(--paper);
+    border: 1px solid var(--faint); border-radius: 20px; cursor: pointer;
+  }
+  .signup:hover { border-color: var(--ink-2); background: var(--paper); }
+  .signup:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+  .signup-note {
+    margin: 10px 0 0; padding: 9px 11px;
+    background: var(--cream); border: 1px solid var(--line-warm); border-radius: 6px;
+    font-size: 12.5px; line-height: 1.5; color: var(--muted);
+  }
+  .signup-note code {
+    display: block; margin-top: 6px;
+    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
+    overflow-wrap: anywhere;
+  }
+
+  /* ---- footer: three links on one line, the copyright in the lighter grey
+     beneath them. The links are text, not anchors: none of those pages exist
+     here, and theirs read as plain dark ink anyway. ---- */
+  .foot { margin: 80px 0 0; text-align: center; }
+  .foot-links {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 28px;
+    margin: 0; font-size: 14px; color: var(--bar-ink);
+  }
+  .foot-copy { margin: 10px 0 0; font-size: 14px; color: var(--faint); }
 </style>
 </head>
 <body>
@@ -123,7 +201,7 @@
              autocapitalize="none" autocorrect="off" spellcheck="false" autofocus required>
     </label>
 
-    <div class="row">
+    <div class="pwrow">
       <label class="lbl" for="password">Password</label>
       <button type="button" class="assist" id="assist" aria-expanded="false"
               aria-controls="assist-body">Password assistance</button>
@@ -138,32 +216,64 @@
     <p id="error" role="alert"></p>
   </form>
 
-  <p class="note">
-    Repeated failures are rate-limited with a growing delay. A correct password
-    always gets through.
+  <!-- Theirs are links to pages this app does not have, so they carry their
+       ink and nothing else: text, not anchors. -->
+  <p class="legal">By signing in, you agree to the Goodreads
+    <span class="legal-link">Terms of Service</span> and
+    <span class="legal-link">Privacy Policy</span></p>
+
+  <div class="keep">
+    <input type="checkbox" id="keep" name="keep" checked>
+    <label for="keep">Keep me signed in.</label>
+    <button type="button" class="details" id="details" aria-expanded="false"
+            aria-controls="details-body">Details</button>
+  </div>
+  <p class="details-body" id="details-body" hidden>
+    Ticked, the session cookie lives for this server's full session lifetime (7 days);
+    unticked, it expires after 12 hours. Repeated failed sign-ins are rate-limited with
+    a growing delay — a correct password always gets through.
   </p>
 
-  <div class="divider"><span>Self-hosted</span></div>
-  <p class="fine">Goodreads, self-hosted edition — not affiliated with goodreads.com.</p>
+  <div class="divider"><span>New to Goodreads?</span></div>
+
+  <button type="button" class="signup" id="signup" aria-expanded="false"
+          aria-controls="signup-note">Sign up</button>
+  <p class="signup-note" id="signup-note" hidden>
+    There is no registration here — accounts are made on the server:
+    <code>python -m app.cli set-password &lt;username&gt;</code>
+  </p>
+
+  <footer class="foot">
+    <p class="foot-links">
+      <span>Terms of Service</span><span>Privacy</span><span>Help</span>
+    </p>
+    <p class="foot-copy">© 2026 Goodreads LLC</p>
+  </footer>
 </main>
 
 <script>
 const form = document.getElementById('form');
 const errorBox = document.getElementById('error');
 const submit = document.getElementById('submit');
-const assist = document.getElementById('assist');
-const assistBody = document.getElementById('assist-body');
+const keep = document.getElementById('keep');
+
+/* Every disclosure on this page is a button that reports its state and hides a
+   panel: aria-expanded on the button, hidden on the panel. */
+function disclosure(button, panel) {
+  button.addEventListener('click', () => {
+    const open = button.getAttribute('aria-expanded') === 'true';
+    button.setAttribute('aria-expanded', String(!open));
+    panel.hidden = open;
+  });
+}
+disclosure(document.getElementById('assist'), document.getElementById('assist-body'));
+disclosure(document.getElementById('details'), document.getElementById('details-body'));
+disclosure(document.getElementById('signup'), document.getElementById('signup-note'));
 
 fetch('/api/auth/status')
   .then(r => r.json())
   .then(s => { if (s.authenticated) location.replace('/'); })
   .catch(() => {});
-
-assist.addEventListener('click', () => {
-  const open = assist.getAttribute('aria-expanded') === 'true';
-  assist.setAttribute('aria-expanded', String(!open));
-  assistBody.hidden = open;
-});
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -177,6 +287,7 @@ form.addEventListener('submit', async (event) => {
       body: JSON.stringify({
         username: document.getElementById('username').value,
         password: document.getElementById('password').value,
+        keep_signed_in: keep.checked,
       }),
     });
     const data = await response.json().catch(() => ({}));
