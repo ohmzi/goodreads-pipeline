@@ -1770,6 +1770,12 @@ a.chip.svc-tag:active {
    notification on the card rather than as punctuation after "What's new". */
 .rail-foot .sidebar-version .new-dot { margin-left: auto; }
 
+/* The version pill's own card, separate from Run control: it is metadata
+   about the running instance, not a control, and sat under Run control's
+   own hairline only because there was nowhere else built for it yet. */
+.rail-card-version .sidebar-version { width: 100%; box-sizing: border-box; }
+.rail-card-version .sidebar-version .new-dot { margin-left: auto; }
+
 /* ============================================================= version page */
 /* A single scrollable timeline of releases, one entry per version, newest
    first. Each entry is its own panel-like block so a long changelog reads as

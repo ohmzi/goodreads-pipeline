@@ -618,7 +618,10 @@ function renderRail() {
     <div class="rail-card">
       <h3>Run control</h3>
       <div class="body">${runControlBody()}</div>
-      <div class="rail-foot">
+    </div>
+
+    <div class="rail-card rail-card-version">
+      <div class="body">
         <a class="sidebar-version${unread ? ' unread' : ''}" href="#/version"
            title="${unread ? 'New in this version' : 'Version history'}">
           ${ver ? `<span class="vnum">v${escapeHtml(ver)}</span>` : ''}What's new${
@@ -2074,11 +2077,18 @@ async function render() {
     $('.search-toggle')?.setAttribute('aria-expanded', 'true');
   }
 
-  if (navigated) {
+  // A search keystroke on any route but Books calls go('/books') to get
+  // there, which fires hashchange like any other navigation and set
+  // `navigated` for exactly this block — so without the guard, typing a
+  // single character stole focus from the field being typed into and
+  // dropped it on the page's own <h1> instead, ending the keystroke.
+  if (navigated && document.activeElement !== headerSearch) {
     navigated = false;
     window.scrollTo(0, 0);
     const h = $('#view h1[tabindex="-1"]');
     if (h) h.focus({ preventScroll: true });
+  } else {
+    navigated = false;
   }
 }
 
