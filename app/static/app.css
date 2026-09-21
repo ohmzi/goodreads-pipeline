@@ -2052,15 +2052,21 @@ a[target="_blank"]:active {
      shrinks too, not just the input's margin, so the box actually reaches
      the screen edges instead of stopping at the 12px the row keeps for the
      wordmark's benefit at every other time. */
-  .bar.search-open .bar-inner { padding-left: 8px; padding-right: 8px; }
+  /* grid-template-columns drops to two tracks, not the base rule's three:
+     column 2 there is `auto`, sized to the wordmark — and a hidden
+     (display:none) element contributes nothing to track sizing on its own,
+     but .bar-search spanning across that still-`auto` column left it sized
+     indeterminately, which is what put a stray gap between the icon and the
+     input rather than the two sitting flush. Redeclaring the columns for
+     this state removes the leftover wordmark track entirely instead of
+     hoping it collapses to zero. */
+  .bar.search-open .bar-inner {
+    grid-template-columns: auto 1fr; padding-left: 8px; padding-right: 8px;
+  }
   .bar.search-open .wordmark, .bar.search-open .menu-toggle { display: none; }
-  /* grid-column: 2 / -1, not the base rule's 1 / -1: column 1 is
-     .search-toggle's own cell, and .search-toggle stays on screen as the
-     close control while search is open (it comes after .bar-search in the
-     DOM, so left at 1 / -1 the two would occupy the same cell and the icon
-     would paint over the input's left edge instead of sitting beside it). */
+  .bar.search-open .search-toggle { grid-column: 1; }
   .bar.search-open .bar-search {
-    display: flex; align-items: center; grid-column: 2 / -1; margin: 0 0 0 4px;
+    display: flex; align-items: center; grid-column: 2; margin: 0 0 0 4px;
   }
   /* A single ring, not the border-colour change plus a separately offset
      outline stacking into the heavy double ring a phone's touch focus
@@ -2085,6 +2091,12 @@ a[target="_blank"]:active {
   .search-toggle:focus-visible, .menu-toggle:focus-visible {
     outline: 2px solid var(--teal); outline-offset: 2px;
   }
+  /* A touch device has no real "unhover": the tap that opens the panel
+     leaves :hover/:active matched on the button for as long as the panel
+     stays open, which reads as a stray cream circle sitting there rather
+     than a press. Once the panel it opened is actually open, the row
+     itself already says so — the icon does not need to keep announcing it. */
+  .bar.search-open .search-toggle, .bar.menu-open .menu-toggle { background: none; }
 
   /* The dropdown .menu-toggle opens. top is a fixed pixel, not a percentage:
      row one is 32px of content in an 8px-padded grid (40px), plus the 4px
