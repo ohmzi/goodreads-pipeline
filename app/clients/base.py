@@ -7,6 +7,9 @@ reads as "401 from Kavita" rather than a stage that silently does nothing.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+
 import httpx
 
 from ..crypto import cipher
@@ -15,14 +18,44 @@ from ..db import db
 DEFAULT_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
 
 
+def _retry_after(resp: httpx.Response) -> float | None:
+    """How long the service asked us to wait, in seconds, or None.
+
+    `Retry-After` is either a number of seconds or an HTTP-date. Both forms are
+    accepted because the spec allows either and the cost of getting it wrong is
+    a cooldown that ignores the one piece of timing evidence a rate limiter
+    ever gives us.
+    """
+    raw = (resp.headers.get("retry-after") or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+
+
 class ClientError(RuntimeError):
     def __init__(self, service: str, message: str, status: int | None = None,
-                 kind: str | None = None):
+                 kind: str | None = None, retry_after: float | None = None):
         self.service = service
         self.status = status
         #: Set only where the status code cannot express the cause — see
         #: `require_cred`. `None` means "derive it from the status".
         self._kind = kind
+        #: Seconds the service asked us to wait, if it said. Carried here
+        #: rather than reconstructed later because the header is gone by the
+        #: time the failure reaches the scheduler.
+        self.retry_after = retry_after
         super().__init__(f"{service}: {message}")
 
     @property
@@ -41,6 +74,18 @@ class ClientError(RuntimeError):
             return "auth"
         if self.status == 404:
             return "notfound"
+        if self.status in (408, 425, 429):
+            # Refusing work *right now*, not broken: the same "try again"
+            # answer as a 5xx, but named separately so a message can say "too
+            # many requests" rather than "the service returned an error".
+            # Anna's Archive answers 429 to concurrent searches, which is
+            # exactly the load the pipeline's own worker pool creates.
+            #
+            # Before this arm, a 429 fell through to "" — unclassified — so it
+            # was neither forgiven by `_forgive_transient` (which gates on the
+            # kind) nor grouped with its service, and every affected book was
+            # parked on its first attempt.
+            return "busy"
         if self.status is not None and self.status >= 500:
             return "server"
         if self.status is None:
@@ -103,6 +148,7 @@ class ServiceClient:
                 self.name,
                 f"{what} failed with HTTP {resp.status_code}: {snippet}",
                 status=resp.status_code,
+                retry_after=_retry_after(resp),
             )
         return resp
 
