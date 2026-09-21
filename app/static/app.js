@@ -371,6 +371,7 @@ function renderMasthead() {
   const dot = c => `<span class="dot ${c}" aria-hidden="true"></span>`;
 
   let cls = 'health-pill';
+  let dotCls = 'idle';
   let html;
   let label;
   if (!health || !health.services.length) {
@@ -384,17 +385,24 @@ function renderMasthead() {
       net && `${net} unreachable`,
     ].filter(Boolean);
     cls = 'health-pill ' + (auth ? 'bad' : 'warn');
-    html = dot(auth ? 'err' : 'warn') +
+    dotCls = auth ? 'err' : 'warn';
+    html = dot(dotCls) +
       `<span class="n">${bad}</span><span class="label">${parts.join(' · ')}</span>`;
     label = `${bad} service problem${bad > 1 ? 's' : ''}: ${parts.join(', ')}`;
   } else {
     const total = health.services.length;
-    html = dot('ok') + `<span class="label">${total} service${total > 1 ? 's' : ''} healthy</span>`;
+    dotCls = 'ok';
+    html = dot(dotCls) + `<span class="label">${total} service${total > 1 ? 's' : ''} healthy</span>`;
     label = `${total} services healthy`;
   }
   pill.className = cls;
   if (pill.innerHTML !== html) pill.innerHTML = html;
   pill.setAttribute('aria-label', label);
+
+  // The collapsed mobile toggle carries the same colour so a glance still
+  // answers "is anything broken" without opening the panel behind it.
+  const menuDot = $('#menu-dot');
+  if (menuDot) menuDot.className = 'dot ' + dotCls;
 }
 
 /* Under 1000px the search box drops to its own row, hidden until asked for. */
@@ -404,7 +412,18 @@ function toggleSearch() {
   const open = bar.classList.toggle('search-open');
   const btn = $('.search-toggle');
   if (btn) btn.setAttribute('aria-expanded', String(open));
-  if (open) $('#global-search')?.focus();
+  if (open) { $('#global-search')?.focus(); bar.classList.remove('menu-open'); }
+}
+
+/* Under 780px the health pill and sign-out drop into a dropdown behind one
+ * button, the same idea as toggleSearch() above. */
+function toggleAccountMenu() {
+  const bar = $('.bar');
+  if (!bar) return;
+  const open = bar.classList.toggle('menu-open');
+  const btn = $('.menu-toggle');
+  if (btn) btn.setAttribute('aria-expanded', String(open));
+  if (open) bar.classList.remove('search-open');
 }
 
 /* The single most important piece of feedback in the app: if a credential is

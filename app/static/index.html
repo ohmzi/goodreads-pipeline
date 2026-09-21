@@ -30,11 +30,22 @@
       </div>
       <!-- Only shown under 1000px, where the search box drops to its own row. -->
       <button class="search-toggle" type="button" onclick="toggleSearch()" aria-label="Search books" aria-expanded="false" aria-controls="global-search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></svg></button>
-      <!-- The one control with no Goodreads equivalent: service health, always
-           on screen, one click from the page that explains and logs it. -->
-      <a class="health-pill" id="health-pill" href="#/services"></a>
-      <div class="bar-account">
-        <a class="nav-link" href="#" onclick="signOut();return false;">Sign out</a>
+      <!-- Only shown under 780px, where the health pill and sign-out below no
+           longer fit beside the wordmark and search without wrapping the bar
+           to a third row. Collapses both behind one button instead. -->
+      <button class="menu-toggle" type="button" onclick="toggleAccountMenu()" aria-label="Service status and account" aria-expanded="false" aria-controls="acct-panel">
+        <span class="dot" id="menu-dot" aria-hidden="true"></span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <!-- display:contents above 780px, so these sit inline exactly as before;
+           becomes a dropdown panel under the toggle button below it. -->
+      <div class="acct-panel" id="acct-panel">
+        <!-- The one control with no Goodreads equivalent: service health, always
+             on screen, one click from the page that explains and logs it. -->
+        <a class="health-pill" id="health-pill" href="#/services"></a>
+        <div class="bar-account">
+          <a class="nav-link" href="#" onclick="signOut();return false;">Sign out</a>
+        </div>
       </div>
     </div>
   </header>

@@ -498,17 +498,20 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
    (2.81:1 on white — unusable at 14px); #757575 holds 4.61:1 (§7). */
 .bar-search input::placeholder { color: var(--ghost); }
 
-/* .searchBox__icon--magnifyingGlass, verbatim: 18x19 at right:4px/top:6.5px,
-   with their own filter:brightness(0) turning the grey glyph black. A
-   pseudo-element rather than markup because app.js and the HTML are frozen for
-   this pass, and the filter cannot be applied to a background-image sitting on
-   the input itself. It paints over the input's right edge, so pointer-events
-   must stay off or it would swallow clicks on the last 18px of the field. */
-.bar-search::after {
-  content: ""; position: absolute; right: 4px; top: 6.5px;
+/* .searchBox__icon--magnifyingGlass, sized to match: 18x19, black, painted
+   over the input's right edge. The markup carries a real inline <svg> (its
+   stroke is set inline, not here) rather than a background-image on a
+   pseudo-element, so there is no dependency on goodreads.com's own CDN for
+   the icon to render at all. Without this rule the <svg> has a viewBox but no
+   width/height, so an unsized-replaced-element default takes over — small
+   and easy to miss in .bar-search's normal 155-270px width, grotesquely
+   large once .bar-search grows to fill a whole row (see the 780px block).
+   pointer-events stays off so it cannot swallow clicks meant for the input
+   underneath it, and centering on the input's own height (rather than a
+   fixed top offset) survives any future change to the 32px input height. */
+.bar-search svg {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
   width: 18px; height: 19px;
-  background: url("https://s.gr-assets.com/assets/layout/header/icn_nav_search.svg") no-repeat;
-  filter: brightness(0);
   pointer-events: none;
 }
 
@@ -544,6 +547,27 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
 /* Only shown under 1000px (see the breakpoints section), where the search box
    drops to its own row behind a toggle instead of narrowing forever. */
 .search-toggle { display: none; }
+
+/* display:contents above 780px: the health pill and sign-out sit inline in
+   .bar-inner exactly as if this wrapper were not there at all — it exists
+   only so the pair can become one dropdown below, without touching the two
+   controls themselves or the JS that renders into them. */
+.acct-panel { display: contents; }
+
+/* Only shown under 780px, where the pill and sign-out no longer fit beside
+   the wordmark and search without wrapping the bar to a third row (see the
+   breakpoints section). Geometry matches .search-toggle: same 32px box,
+   nearest control this app has no Goodreads equivalent for either. */
+.menu-toggle {
+  display: none; align-items: center; gap: 4px;
+  width: 32px; height: 32px; padding: 0; margin: 0 0 0 4px;
+  border: 0; background: none; color: var(--bar-ink); cursor: pointer;
+}
+.menu-toggle svg { width: 18px; height: 18px; transition: transform .15s ease; }
+.menu-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+/* The dot alone is the glance answer — "is anything broken" — without
+   opening the panel; renderMasthead() keeps it in step with the pill's own. */
+.menu-toggle .dot { width: 8px; height: 8px; }
 
 /* No Goodreads equivalent — the always-visible answer to "is anything broken
    right now", one click from the page that explains and logs it. Geometry
@@ -1974,16 +1998,38 @@ a[target="_blank"]:active {
 /* ====================================================== max-width: 780px */
 /* The header at phone width. Goodreads deletes its navbar search below 767px
    (ref §4 .searchBox--navbar{display:none}); the app keeps it, because the
-   search box is how a book is reached at all, and wraps the bar instead: logo
-   and account block on the first line, search on the second, nav links on a
-   third that scrolls sideways rather than breaking to two rows. */
+   search box is how a book is reached at all. What no longer fits on one row
+   with the wordmark and a usable search box is the health pill and the
+   sign-out link, so those two collapse behind .menu-toggle instead of forcing
+   a third row: row one is the wordmark, search and that button, row two is
+   the nav as a strip that scrolls sideways rather than breaking to two rows. */
 @media (max-width: 780px) {
   .bar-inner { height: auto; flex-wrap: wrap; padding: 8px 12px; }
   /* The wordmark is an SVG at a fixed 140×30 now (ref §3), so there is no type
      step left to take here — the old `font-size:19px` retired with the text. */
   .nav { order: 3; width: 100%; overflow-x: auto; }
   .nav a { padding: 0 11px; font-size: 14px; line-height: 40px; }
-  .bar-search { order: 2; flex: 1; max-width: none; }
+  /* Not order:2 any more — search stays on row one now that the pill and
+     sign-out are out of its way, so it no longer needs a row of its own. */
+  .bar-search { order: 1; flex: 1; min-width: 0; max-width: none; margin: 0 4px; }
+  /* Its job (push search/pill/account to the right edge) is redundant once
+     .bar-search is itself flex:1 and fills whatever room is left. */
+  .spacer { display: none; }
+  .menu-toggle { display: flex; order: 2; }
+
+  /* The dropdown .menu-toggle opens. Anchored to the header's own edge, not
+     to the button, because the button's position shifts with the search
+     box's width and a panel that tracked it would jump on every render. */
+  .acct-panel { display: none; }
+  .bar.menu-open .acct-panel {
+    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
+    position: absolute; top: 100%; right: 12px; z-index: 71;
+    min-width: 200px; padding: 10px;
+    background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-float);
+  }
+  .bar.menu-open .health-pill { justify-content: center; }
+  .bar.menu-open .bar-account { padding-left: 0; justify-content: center; }
 
   .page { padding: 12px; }
 
