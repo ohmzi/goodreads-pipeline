@@ -19,6 +19,14 @@ run against the real services:
   * **A failed release is not a failed book.** If Shelfmark errors on the
     release we picked, the next-best one usually works, so the stages record
     what they have already tried and move down the list.
+
+Every result this module returns *after* a successful `search` or `find_task`
+carries `answered=True`, and the ones that never reached the service do not.
+That is not decoration: "this service has nothing for this book" and "our own
+disk refused this book before we dialed" are both `data` failures, and they are
+opposite facts about the service. The breaker's half-open probe reads exactly
+that difference, so a branch that moves across the free-space guard has to move
+its `answered` with it. See `models.StageResult.answered`.
 """
 
 from __future__ import annotations
@@ -26,7 +34,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from .. import models
+from .. import breaker, models
 from ..clients.base import ClientError
 from ..clients.shelfmark import (
     AUDIOBOOK,
@@ -38,6 +46,7 @@ from ..clients.shelfmark import (
 )
 from ..config import settings
 from ..db import db
+from ..health import canonical
 from ..pathing import EBOOK_EXTS, AUDIO_EXTS, find_matching_entries, free_space_gb
 
 # How long to wait before deciding a queued entry is gone. This only applies
@@ -97,16 +106,83 @@ def _run(
         # answers `503 every indexer failed` routinely, and marking 77 books
         # failed for it — when the identical search succeeds moments later —
         # filled the attention list with books that needed no attention.
-        if exc.status is not None and exc.status >= 500:
+        #
+        # `busy` (408/425/429) is the same conclusion in a different message: a
+        # rate-limited source is refusing work now, not refusing the book.
+        if exc.status is not None and (exc.status >= 500 or exc.kind == "busy"):
+            svc = canonical(exc.service)
+
+            # Already held: hand back a hold and do *not* touch this book's own
+            # grace clock. It would otherwise inflate a 24h budget on failures
+            # that were never the book's, and a book held through a long outage
+            # would hit its personal ceiling the moment the outage ended.
+            if breaker.is_holding(svc):
+                # The breaker is told *before* the hold is handed back, and that
+                # ordering is the whole half-open probe.
+                #
+                # `hold()` deliberately clears `kind` — a held stage has not
+                # failed — which leaves the result carrying no verdict about the
+                # service at all, and `pipeline._advance` reads the probe's
+                # verdict from exactly that field. Half-open counts as holding,
+                # so without this line the probing book took this branch, came
+                # back with a held result whose `kind` was `''`, and `_advance`
+                # resolved the probe as *answered* — closing the breaker on the
+                # very 503 that proves the service is still down. Then nothing
+                # held the service, so the next sweep tried every book again:
+                # ~7 searches a cycle against a dead source, a fresh
+                # `opened_at` each cycle (so the 24h escalation could never
+                # fire), and a "Shelfmark is answering again" line per cycle.
+                #
+                # `record_failure` is the right call for both cases this branch
+                # covers: half-open re-opens on the doubled cooldown through
+                # `_reopen`, after which `resolve_probe` is a no-op because the
+                # state is no longer half_open; and genuinely open it only
+                # refreshes `last_failure`, which is the message the operator's
+                # one line prints.
+                breaker.record_failure(svc, str(exc), retry_after=exc.retry_after)
+                # `recorded=True` because the line above is this failure's
+                # record: `_advance`'s probe handling must not send it again,
+                # or the upstream's own words — which this call just stored —
+                # are replaced by our wrapper around them. See
+                # `StageResult.recorded`.
+                return breaker.hold(
+                    models.StageResult.failed(str(exc), kind=exc.kind,
+                                              service=exc.service),
+                    svc, recorded=True,
+                )
+
             count, since = db().bump_transient(book_id, stage)
             down_for = db().transient_age_hours(since)
             if down_for < MAX_TRANSIENT_HOURS:
+                # Tell the breaker *here*, at the first point the code knows
+                # this is the service and not the book. This path returns
+                # `blocked`, so `_advance` never sees a failure for it and
+                # would never feed the breaker — counting only at the write-off
+                # below let a whole day of an outage pass with the breaker
+                # still closed. This is what makes it trip inside the first
+                # sweep, and what stops the sweep grinding through 169 books.
+                breaker.record_failure(svc, str(exc), retry_after=exc.retry_after)
+                if breaker.is_holding(svc):
+                    # `recorded=True` for the same reason as the branch above:
+                    # this hold stands in for a failure the breaker has just
+                    # been told about, and only the message half of that is at
+                    # stake — the verdict is False either way, because a
+                    # transient kind is never an answer.
+                    return breaker.hold(
+                        models.StageResult.failed(str(exc), kind=exc.kind,
+                                                  service=exc.service),
+                        svc, recorded=True,
+                    )
                 return models.StageResult.blocked(
                     f"the sources are unavailable ({str(exc)[:60]}) — down for "
                     f"{down_for:.1f}h of {MAX_TRANSIENT_HOURS}h before this counts "
                     f"as a real failure ({count} attempts so far)",
                     service=exc.service,
                 )
+            # Past the grace this becomes a real `failed` result, and
+            # `_advance` feeds the breaker from that one — so it is not
+            # recorded here as well, or a single failure would count twice
+            # towards the three that are meant to be the trip evidence.
             return models.StageResult.failed(
                 f"{exc} — the sources have been unavailable for {down_for:.0f} "
                 f"hours, so this is not a passing outage",
@@ -148,6 +224,11 @@ def _queue(
     if content_type == AUDIOBOOK:
         free = free_space_gb(settings.audiobooks_root)
         if free < settings.min_free_space_gb:
+            # Deliberately *not* `answered`: this returns before the search, so
+            # the service was never asked and this result is our own disk
+            # talking. It carries the same `kind='data'` a successful empty
+            # search carries, which is exactly why the two cannot be told apart
+            # by kind and why `StageResult.answered` exists.
             return models.StageResult.failed(
                 f"only {free:.1f} GB free where audiobooks land; floor is "
                 f"{settings.min_free_space_gb} GB. Free space before retrying.",
@@ -159,16 +240,36 @@ def _queue(
         # Reaching the sources worked, so this is a fact about availability,
         # not a transient fault — reset the forgiveness counter.
         db().reset_transient(book_id, stage)
+        # Everything below this line returns after a search that *succeeded*,
+        # so it carries `answered=True`: the service was asked, and "nothing
+        # for this book" is what it said. That is the whole of the F1 fix —
+        # `kind` stays `data` (the issues panel buckets on it, and `cli`'s
+        # `failure_kind='data'` queries would lose these rows otherwise), so
+        # the breaker's half-open probe would otherwise read a healthy
+        # service's own answer as silence and re-open on it, forever, for the
+        # books that lead the rotation. See `StageResult.answered`.
         # Say which of the two it was: nothing found at all, or only releases
         # that are plainly the wrong format. "No releases found" when thirty
         # films were rejected reads as a search bug rather than a fact.
         rejected = getattr(client, "last_rejections", None) or []
         if rejected:
             sample = "; ".join(rejected[:2])
+            # An audiobook search that returns only an epub has not *failed*: it
+            # has established that no audiobook exists, which this codebase
+            # already treats as a quiet fact about the world ("no-audiobook",
+            # which `main._cause_bucket` keeps non-actionable). Leading with
+            # "wrong format — not a book" made it read as a fault with a
+            # rejection reason bolted on, and it arrived as one alarming row per
+            # book — 1 book in the observed outage, but the same shape as the 18.
+            #
+            # The rejection detail is kept, because a human looking at *this*
+            # book still wants to know what the search threw away; it just no
+            # longer leads the sentence.
             return models.StageResult.failed(
-                f"found {len(rejected)} release(s) for '{title[:50]}' but every one "
-                f"was the wrong format — not a book. E.g. {sample}",
-                kind="data",
+                f"no {content_type} releases found for '{title}' — the "
+                f"{len(rejected)} release(s) the search returned were not "
+                f"{content_type}s. E.g. {sample}",
+                kind="data", answered=True,
             )
         return models.StageResult.failed(
             f"no {content_type} releases found for '{title}'"
@@ -177,6 +278,9 @@ def _queue(
             # configured source. Marking it "data" keeps it out of the pile of
             # failures that need a human.
             kind="data",
+            # The search answered; it just had nothing. Not a fault, and not
+            # silence either — see the note above the `rejected` branch.
+            answered=True,
         )
 
     tried = _tried_releases(book_id, stage)
@@ -184,10 +288,14 @@ def _queue(
     remaining = [r for r in ranked if r.source_id not in tried]
 
     if not remaining:
+        # Same shape as the two above: a search and a rank both came back from
+        # the service, so it answered — with a list of releases it then failed
+        # to download, which is this book's problem and not the service's
+        # availability. `answered` only says the service is talking.
         return models.StageResult.failed(
             f"tried all {len(tried)} candidate release(s) for '{title[:50]}' and "
             f"every download failed",
-            kind="data",
+            kind="data", answered=True,
         )
 
     best = remaining[0]
@@ -233,8 +341,12 @@ def _watch(
     if found:
         task_id, status, entry = found
         if status in TASK_OK:
+            # Named, because this is the `ok` that proves Shelfmark is answering
+            # again: `pipeline._advance` feeds it to `breaker.record_success`,
+            # which is what clears a part-built failure streak.
             return models.StageResult.ok(
-                f"Shelfmark completed task {task_id}", artifact=task_id
+                f"Shelfmark completed task {task_id}", artifact=task_id,
+                service=client.name,
             )
         if status in TASK_FAILED:
             reason = entry.get("error") or entry.get("detail") or entry.get("status_message") or status
@@ -252,10 +364,14 @@ def _watch(
                 return models.StageResult.blocked(
                     f"release failed ({str(reason)[:70]}); will try another"
                 )
+            # `find_task` returned a task and its status, so this is a service
+            # answering about a release that failed — the same false negative
+            # as the empty search, one branch over, and it wedges the breaker
+            # the same way for a book whose download died.
             return models.StageResult.failed(
                 f"Shelfmark reported {status}: {reason} — after "
                 f"{len(tried)} different releases",
-                kind="data",
+                kind="data", answered=True,
             )
         if status in TASK_ACTIVE or not status:
             return models.StageResult.blocked(f"Shelfmark: {status or 'working'}")
@@ -268,8 +384,11 @@ def _watch(
     hits = find_matching_entries(output_root, title, author)
     if hits:
         score, path = hits[0]
+        # An `ok` for a book we had queued with Shelfmark. The file is what
+        # proves it, so it counts as this service answering.
         return models.StageResult.ok(
-            f"found on disk ({score:.2f} match): {path.name}", artifact=str(path)
+            f"found on disk ({score:.2f} match): {path.name}", artifact=str(path),
+            service=client.name,
         )
 
     # Shelfmark keeps its queue in memory, so restarting the container drops
