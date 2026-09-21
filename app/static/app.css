@@ -1106,40 +1106,35 @@ a.chip.svc-tag:active {
 /* ref §4 .bigTabs .tab — white, brown, square, 2px black underline when current
    or hovered.
 
-   The strip carries the baseline itself: .bigTabs is border-bottom:1px solid
-   #D8D8D8 with margin-bottom:20px, and that rule runs under *all* the tabs, not
-   only the selected one. The app nests the strip inside .toolbar, so this
-   leaves two rules — the strip's #D8D8D8 and, 20px below it, the toolbar's own
-   #DFDFDF — which is the reference's own shape: .bigTabs' rule, then
-   .reviewControls' under it. The 20px is the tab strip's margin, so the
-   "filtered by" note the toolbar also holds sits in that band. */
-.filters {
-  display: flex; flex-wrap: wrap;
-  border-bottom: 1px solid var(--line);   /* #D8D8D8 — .bigTabs' baseline, under every tab */
-  margin-bottom: 20px;                    /* ref §4 .bigTabs */
-}
-/* The tab keeps no fill and no rule of its own beyond the 2px black underline,
-   which is drawn on the tab's own bottom edge and sits against the strip's
-   baseline below it. `margin` is right-only because the strip starts flush with
-   the toolbar's left edge where .bigTabs' first tab has its own 5px. `outline: 0` is theirs
-   (ref §4 .bigTabs .tab) and is safe — the `.filters button:focus-visible` ring
-   declared at the top of the file is one class heavier and still draws it. */
+   DEPARTURE FROM REF §4: .bigTabs is right for two or three shelf tabs, which
+   is all goodreads.com ever draws here. This app's two uses of .filters
+   (My Books' status filter, Genres' category filter) can both run to a dozen
+   or more — a dynamic category list has no ceiling — and a flat underline
+   with 5px of margin between plain text buttons stopped being legible at
+   that count: wrapped across several lines, "Fantasy 62" and "Fiction 209"
+   read as one run of text with no boundary between one tab and the next.
+   Each tab is a bordered, filled chip instead, so the boundary is a real
+   edge regardless of how many wrap or what count sits next to what label. */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
 .filters button {
-  border: 0; border-radius: 0; background-color: var(--paper); color: var(--bar-ink);
-  font-family: var(--sans); font-size: 14px; line-height: 1.3;
-  margin: 0 5px 0 0; padding: 5px 10px; outline: 0; border-bottom: 2px solid transparent;
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid var(--line-warm); border-radius: 999px;
+  background-color: var(--cream); color: var(--ink-2);
+  font-family: var(--sans); font-size: 13px; line-height: 1.3;
+  margin: 0; padding: 6px 14px; outline: 0;
 }
-.filters button:hover, .filters button.on {
-  border-bottom: 2px solid var(--value); text-decoration: none; color: var(--bar-ink);
-}
-.filters button.on { font-weight: 700; }   /* .gr-button--togglable--enabled:hover precedent */
-/* The press. Hover on a tab deliberately does not move the fill — .bigTabs
-   keeps none, and the 2px underline is their whole hover — so this is the one
-   state that fills, and it fills with .gr-button:active's --line-warm, the same
-   value every other pressed control in the app uses. Declared after .on, which
-   is (0,2,1) like this rule, so the open tab presses too; the underline and the
-   bold both stay, and #382110 on #d6d0c4 is 11.9:1. */
+/* The same cream ramp every other control in the app presses through
+   (--cream → --cream-3 → --line-warm), so a filter chip presses like a
+   button rather than like the tab it no longer visually is. */
+.filters button:hover { background-color: var(--cream-3); }
 .filters button:active { background-color: var(--line-warm); }
+/* Selected takes the header's own dark fill — the same "you are here" the
+   nav's current item and the Genres nav tab both use — rather than a colour
+   invented just for this control. */
+.filters button.on {
+  background-color: var(--bar-ink); border-color: var(--bar-ink); color: var(--paper);
+}
+.filters button.on .faint { color: var(--paper); opacity: .75; }
 .filters button .faint { color: var(--muted); }   /* the count inside a tab */
 
 /* Retained from the frozen class list; the app renders no toolbar search field
@@ -1386,8 +1381,12 @@ a.chip.svc-tag:active {
    derived: no Goodreads equivalent. Colours are the two verified alert inks
    from §3.6 — the error ink for a failure, the confirm ink for "waiting on
    someone", --muted for "nothing is wrong, this is just where it is". */
-.blocker { margin-top: 6px; font-size: 12.5px; }
-.blocker .msg { color: var(--err); word-break: break-word; }
+.blocker { margin-top: 8px; font-size: 12.5px; }
+/* The chip(s) and the message text were flush against each other — a span
+   wrapping right into the block below it with no margin of its own — which
+   is most of what read as "crowded" on a held/failed row carrying both a
+   stage chip and a service chip before the detail line. */
+.blocker .msg { margin-top: 5px; color: var(--err); word-break: break-word; }
 .blocker .msg.soft { color: var(--warn); }
 .blocker .msg.quiet { color: var(--muted); }
 
