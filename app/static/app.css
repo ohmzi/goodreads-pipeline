@@ -2036,7 +2036,30 @@ a[target="_blank"]:active {
   .search-toggle { grid-column: 1; grid-row: 1; justify-self: start; display: flex; }
   .wordmark { grid-column: 2; grid-row: 1; justify-self: center; height: 32px; }
   .menu-toggle { grid-column: 3; grid-row: 1; justify-self: end; display: flex; }
-  .bar-search { grid-column: 1 / -1; grid-row: 1; display: none; }
+  /* position:absolute unconditionally, not a grid item toggled between
+     display:none and display:flex: a grid item's presence changes track
+     sizing (that's what moved the nav row underneath it — the wordmark's
+     "auto" column sized differently once .bar-search started sharing it),
+     and display cannot be transitioned at all, so there was never going to
+     be a slide open out of that approach no matter how the columns were
+     tuned. As a plain overlay it never touches the grid, so nothing else on
+     the row can ever move when it opens — and its own reveal is a
+     transitionable clip-path instead of an instant swap. */
+  .bar-search {
+    position: absolute; left: 48px; right: 12px; top: 8px; height: 32px;
+    display: flex; align-items: center; z-index: 5; pointer-events: none;
+    background: var(--paper);
+    clip-path: inset(0 100% 0 0);
+  }
+  .bar.search-open .bar-search { clip-path: inset(0 0 0 0); pointer-events: auto; }
+  /* The slide itself, kept out of the base rule above: this file refuses
+     motion outright when the viewer has asked for less of it (see "the
+     press" further down), and open/close still has to work instantly
+     either way — only the transition, not the two clip-path states
+     themselves, is conditional. */
+  @media (prefers-reduced-motion: no-preference) {
+    .bar-search { transition: clip-path .22s ease; }
+  }
   .spacer { display: none; }
   .nav { grid-column: 1 / -1; grid-row: 2; width: 100%; }
   /* flex:1 on every link, not a fixed padding: five items sized to their own
@@ -2046,28 +2069,16 @@ a[target="_blank"]:active {
      more narrowly than centring alone would */
   .nav a { flex: 1; text-align: center; white-space: nowrap; padding: 0 4px; font-size: 12.5px; line-height: 52px; }
 
-  /* Search open: the icon becomes the way back (tapping it again closes, via
-     the same toggleSearch() call), the wordmark and status button step
-     aside, and the input takes the whole row — the row's own side padding
-     shrinks too, not just the input's margin, so the box actually reaches
-     the screen edges instead of stopping at the 12px the row keeps for the
-     wordmark's benefit at every other time. */
-  /* grid-template-columns drops to two tracks, not the base rule's three:
-     column 2 there is `auto`, sized to the wordmark — and a hidden
-     (display:none) element contributes nothing to track sizing on its own,
-     but .bar-search spanning across that still-`auto` column left it sized
-     indeterminately, which is what put a stray gap between the icon and the
-     input rather than the two sitting flush. Redeclaring the columns for
-     this state removes the leftover wordmark track entirely instead of
-     hoping it collapses to zero. */
-  .bar.search-open .bar-inner {
-    grid-template-columns: auto 1fr; padding-left: 8px; padding-right: 8px;
-  }
-  .bar.search-open .wordmark, .bar.search-open .menu-toggle { display: none; }
-  .bar.search-open .search-toggle { grid-column: 1; }
-  .bar.search-open .bar-search {
-    display: flex; align-items: center; grid-column: 2; margin: 0 0 0 4px;
-  }
+  /* Search open: the icon stays as the way back (tapping it again closes,
+     via the same toggleSearch() call). The wordmark and status button are
+     deliberately NOT display:none here — the overlay's own opaque
+     background sliding across them as it reveals left-to-right is what
+     makes the animation read as a search bar sweeping over the row rather
+     than the row's other controls just vanishing the instant a tap
+     lands. pointer-events:none is what actually stops them being usable
+     the moment they are covered, whether or not the sweep has visually
+     reached them yet. */
+  .bar.search-open .wordmark, .bar.search-open .menu-toggle { pointer-events: none; }
   /* A single ring, not the border-colour change plus a separately offset
      outline stacking into the heavy double ring a phone's touch focus
      produces on a text input (Chrome treats a focused text field as
