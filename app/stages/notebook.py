@@ -80,10 +80,16 @@ def run(book: dict) -> models.StageResult:
 
         notebook = client.notebook_named(notebook_name)
         if notebook is None:
+            # `answered=True`: the service listed its notebooks and this one was
+            # not among them, so it is talking. Same distinction as the acquire
+            # stage's empty search — a `data` failure that reached the service
+            # versus one that never dialed — and the same consequence if it is
+            # lost: a half-open probe reads a working Open Notebook as silence
+            # and re-opens the breaker. See `models.StageResult.answered`.
             return models.StageResult.failed(
                 f"no Open Notebook notebook named '{notebook_name}'. Create it, "
                 f"or point category {category} at one that exists in categories.yml.",
-                kind="data",
+                kind="data", answered=True,
             )
         notebook_id = str(notebook.get("id") or "")
 
@@ -119,10 +125,13 @@ def run(book: dict) -> models.StageResult:
                 kind="server",
             )
         if state["status"] in ("error", "failed"):
+            # `answered=True` again: this status came back from the service's own
+            # `source_state` read. A source it could not process is a book's
+            # problem, not evidence the service is unreachable.
             return models.StageResult.failed(
                 f"Open Notebook failed to process source {source_id} "
                 f"({state['status']}) — the book is attached but has no readable text",
-                kind="data",
+                kind="data", answered=True,
             )
 
         verb = "reused existing source" if reused else "added"
@@ -132,7 +141,9 @@ def run(book: dict) -> models.StageResult:
         detail += ")"
         if len(state["notebooks"]) > 1:
             detail += f" [also in {len(state['notebooks']) - 1} other notebook(s)]"
-        return models.StageResult.ok(detail, artifact=source_id)
+        # Named so `pipeline._advance` can feed it to `breaker.record_success`.
+        return models.StageResult.ok(detail, artifact=source_id,
+                                     service=client.name)
     except ClientError as exc:
         return models.StageResult.failed(
             str(exc), kind=exc.kind, service=exc.service
