@@ -499,7 +499,7 @@ results land in `service_health`:
 | `service` | slug: `shelfmark`, `kavita`, `booklore`, `grimmory`, `audiobookshelf`, `opennotebook` |
 | `ok` | 0 or 1 |
 | `detail` | e.g. `4 libraries`, `3 notebook(s)`, or the error text |
-| `failure_kind` | `auth`, `network`, `server`, `notfound`, or empty |
+| `failure_kind` | `auth`, `network`, `server`, `busy`, `notfound`, or empty |
 | `checked_at` | last probe |
 | `ok_since` | start of the current unbroken healthy run; cleared on the first failure |
 
@@ -512,6 +512,43 @@ banner naming the service and what breaks without it.
 `GET /api/issues` groups book failures by cause rather than by book, and
 separates failures with kind `auth` from everything else, so "Kavita rejected
 your API key" does not sit in the same list as "no audiobook release exists".
+
+### When nothing seems to be happening
+
+A sweep that reports `held` in its summary, or an issue row whose stage reads
+`held`, is the service breaker doing its job: a service it depends on is down,
+so nothing is attempted against it and nothing is written off for it. It is one
+row naming the service, not a book failure, and there is genuinely nothing to
+fix — the text says so — unless the row has escalated.
+
+That escalation is the part to watch. An outage younger than 24 hours really is
+not yours to fix, and saying so is honest; past the grace the same row changes
+its wording and points at the service itself, which is what stops the breaker
+from being the thing that hides a permanently dead upstream. Shelfmark is the
+common case and the trap: its own `/api/health` answers `200` in milliseconds
+even while every release search fails, because the fault is upstream of it in
+Anna's Archive. A green service page therefore proves nothing here.
+
+The books need no action. A held stage is `blocked`, not `failed`, so it is
+picked up by the very next sweep that can run it, and the breaker clears the
+per-book clock it was holding so nothing parks on hours it did not spend.
+
+### When the hold outlives the outage
+
+If you know the service is fine — you just restarted it, or fixed a rate limit
+at the source — and the hold is still there, you do not have to wait for the
+next probe: **Clear hold**, on the held row of the dashboard's attention list or
+on the service's own page, releases everything that service is holding and
+closes its breaker. It confirms first, and it tells you what it did rather than
+what you want to hear: the row goes away, the log records a `warning` saying the
+breaker was cleared by hand and why, and nothing claims the service answered —
+because clearing cannot know that. If it is still down the next sweep trips it
+again a few minutes later, which is the answer to the question you were asking.
+
+Reach for it when the breaker is holding work and the service's own page says
+it is up, or when the outage is over and you would rather not spend a cooldown
+finding out. It is not a way to skip an outage: the books it releases run
+against the service immediately.
 
 ### The Test button is not the probe
 
@@ -549,6 +586,8 @@ same control as *Re-check*. The UI also runs this automatically after Save.
 | *"Could not determine your Goodreads user id"* | No session and no id set | Log in, or set the id explicitly in Settings |
 | *"Goodreads returned an AWS WAF challenge (HTTP 202)"* | IP reputation, writes are rate-limited | Wait 5–10 minutes. Do not retry in a loop |
 | Books blocked with `[transient: Xh of 24h, N attempts]` | A 5xx from the source search; forgiven on a clock, not a counter | Nothing yet. It becomes a real failure after 24 h, so fix the upstream if it persists |
+| An issue row whose stage is `held`, `N books — none failed` | The service breaker: three consecutive transient failures against one service, so nothing is attempted against it | Nothing yet. It resumes by itself; open the service page to see what it is saying. If the `fix` line says the grace has been outlived, the fault is upstream of that service and is now yours to look at |
+| A `busy` group, "The service is rate-limiting requests" | A 429 (or 408/425) survived the breaker, so it is a rate limit that keeps happening rather than one outage | The pipeline backs off and retries. Nothing to fix unless it lasts; if a `Retry-After` was sent, the cooldown already honours it |
 | Login page shows a blank panel | Xvfb or x11vnc did not start | `docker compose logs goodreads \| grep '\[vnc\]'`. The rest of the app works without it |
 | Everything 4xx on `/api/...` with `authentication required` | No session cookie, or an expired one (7 day TTL) | Sign in again |
 | `docker compose up` fails with *"all predefined address pools have been fully subnetted"* | The host's docker address pools are exhausted, or the subnet pinned in `docker-compose.override.yml` collides with a network already on the host | Pin another private /24 in `docker-compose.override.yml` (gitignored, host-specific) |
