@@ -2020,49 +2020,83 @@ a[target="_blank"]:active {
 /* ====================================================== max-width: 780px */
 /* The header at phone width, after their own native app rather than their
    desktop navbar: a bare search icon at the left, the wordmark truly
-   centred (not just centred-in-the-leftover-space — see .wordmark below),
-   and .menu-toggle standing in for their avatar as the one status/account
-   control this app has. Tapping the icon swaps the whole row for the real
-   input, the same .search-open toggle .search-toggle already drove when
-   search sat inline; row two is the nav as its own strip below, unchanged. */
+   centred, and .menu-toggle standing in for their avatar as the one
+   status/account control this app has. Row one is an explicit 3-column
+   grid — icon | wordmark | status — rather than a flex row with the
+   wordmark pulled out to position:absolute: centring on a *percentage* of
+   whatever height a two-row wrapped flex box happens to compute to is what
+   put the wordmark straddling both rows, and the account dropdown
+   overlapping the nav strip below it, in the first cut of this. A grid
+   column centres on its own track no matter what row two is doing. */
 @media (max-width: 780px) {
-  .bar-inner { position: relative; height: auto; flex-wrap: wrap; padding: 8px 12px; justify-content: space-between; }
-  /* True centring, not flex centring: .search-toggle and .menu-toggle are
-     different widths (a bare 32px icon vs. a dot-plus-chevron button), so
-     splitting the row in two around a flex-basis wordmark would put it
-     visibly off-centre toward the wider side. Taking it out of flow and
-     centring on the row itself is what the reference actually shows. */
-  .wordmark {
-    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  .bar-inner {
+    display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+    height: auto; padding: 8px 12px; column-gap: 4px; row-gap: 4px;
+    position: relative;
   }
-  .search-toggle { display: flex; order: 0; }
-  .bar-search { display: none; order: 1; }
-  .menu-toggle { display: flex; order: 2; }
+  .search-toggle { grid-column: 1; grid-row: 1; justify-self: start; display: flex; }
+  .wordmark { grid-column: 2; grid-row: 1; justify-self: center; height: 32px; }
+  .menu-toggle { grid-column: 3; grid-row: 1; justify-self: end; display: flex; }
+  .bar-search { grid-column: 1 / -1; grid-row: 1; display: none; }
   .spacer { display: none; }
-  .nav { order: 3; width: 100%; overflow-x: auto; }
-  .nav a { padding: 0 14px; font-size: 15px; line-height: 52px; }
+  .nav { grid-column: 1 / -1; grid-row: 2; width: 100%; }
+  /* flex:1 on every link, not a fixed padding: five items sized to their own
+     text plus a comfortable inset would not fit a phone at all without the
+     overflow-x scrollbar this replaces — sharing the row exactly five ways
+     always fits, at the cost of some links wrapping their text to two words
+     more narrowly than centring alone would */
+  .nav a { flex: 1; text-align: center; white-space: nowrap; padding: 0 4px; font-size: 12.5px; line-height: 52px; }
 
-  /* Search open: the icon becomes the way back (tapping it again closes,
-     via the same toggleSearch() call), the wordmark and the status button
-     step aside, and the input takes the whole row. */
+  /* Search open: the icon becomes the way back (tapping it again closes, via
+     the same toggleSearch() call), the wordmark and status button step
+     aside, and the input takes the whole row. */
   .bar.search-open .wordmark, .bar.search-open .menu-toggle { display: none; }
   .bar.search-open .bar-search {
-    display: flex; align-items: center; flex: 1; min-width: 0; max-width: none; margin: 0 4px 0 8px;
+    display: flex; align-items: center; margin: 0 4px 0 8px;
+  }
+  /* A single ring, not the border-colour change plus a separately offset
+     outline stacking into the heavy double ring a phone's touch focus
+     produces on a text input (Chrome treats a focused text field as
+     :focus-visible regardless of pointer vs. keyboard, unlike most other
+     controls) — flush offset and a neutral border let the ring alone carry
+     the affordance here, and a touch larger radius reads more like a search
+     field taking over the row and less like every other 3px control. */
+  .bar.search-open .bar-search input { border-radius: 8px; }
+  .bar.search-open .bar-search input:focus { border-color: var(--line); }
+  .bar.search-open .bar-search input:focus-visible { outline-offset: 0; border-radius: 8px; }
+
+  /* Android's default tap highlight on a bare icon button reads as a stray
+     grey box the instant it's pressed; a deliberate round wash on press and
+     the ring on keyboard focus replace it with feedback that is actually
+     ours. */
+  .search-toggle, .menu-toggle {
+    -webkit-tap-highlight-color: transparent; border-radius: 50%;
+  }
+  .search-toggle:hover, .search-toggle:active,
+  .menu-toggle:hover, .menu-toggle:active { background: var(--cream); }
+  .search-toggle:focus-visible, .menu-toggle:focus-visible {
+    outline: 2px solid var(--teal); outline-offset: 2px;
   }
 
-  /* The dropdown .menu-toggle opens. Anchored to the header's own edge, not
-     to the button, because the button's position shifts with the search
-     box's width and a panel that tracked it would jump on every render. */
+  /* The dropdown .menu-toggle opens. top is a fixed pixel, not a percentage:
+     row one is 32px of content in an 8px-padded grid (40px), plus the 4px
+     row-gap, plus nav's 52px line-height, plus the box's own 8px bottom
+     padding — 104px, computed once here rather than left to "100% of
+     whatever this two-row grid's auto height turns out to be", which is
+     exactly the percentage that put the panel overlapping the nav strip in
+     the first cut of this. align-items:center, not stretch: the health pill
+     and Sign out link keep their own compact width and sit centred in the
+     panel, instead of the pill's cream fill stretching edge to edge and
+     reading as a second, unwanted background band. */
   .acct-panel { display: none; }
   .bar.menu-open .acct-panel {
-    display: flex; flex-direction: column; align-items: stretch; gap: 8px;
-    position: absolute; top: 100%; right: 12px; z-index: 71;
-    min-width: 200px; padding: 10px;
+    display: flex; flex-direction: column; align-items: center; gap: 10px;
+    position: absolute; top: 104px; right: 12px; z-index: 71;
+    min-width: 200px; padding: 14px 12px;
     background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius-lg);
     box-shadow: var(--shadow-float);
   }
-  .bar.menu-open .health-pill { justify-content: center; }
-  .bar.menu-open .bar-account { padding-left: 0; justify-content: center; }
+  .bar.menu-open .bar-account { padding-left: 0; }
 
   .page { padding: 12px; }
 

@@ -426,6 +426,28 @@ function toggleAccountMenu() {
   if (open) bar.classList.remove('search-open');
 }
 
+function closeAccountMenu() {
+  const bar = $('.bar');
+  if (!bar || !bar.classList.contains('menu-open')) return;
+  bar.classList.remove('menu-open');
+  $('.menu-toggle')?.setAttribute('aria-expanded', 'false');
+}
+
+// A dropdown with no way to dismiss it except its own toggle is a trap on a
+// phone, where "tap elsewhere" is the only gesture anyone tries first.
+document.addEventListener('click', (event) => {
+  if (event.target.closest('.menu-toggle, .acct-panel')) return;
+  closeAccountMenu();
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeAccountMenu();
+});
+// The health pill inside the dropdown is itself a link to #/services — the
+// outside-click check above lets that click through (it's inside
+// .acct-panel), so without this the panel would still be open on the page
+// it just navigated to.
+window.addEventListener('hashchange', closeAccountMenu);
+
 /* The single most important piece of feedback in the app: if a credential is
  * broken, say so loudly, at the top, with a link to the fix. */
 function renderBanner() {
