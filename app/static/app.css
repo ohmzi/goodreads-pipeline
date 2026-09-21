@@ -2061,14 +2061,9 @@ a[target="_blank"]:active {
     clip-path: inset(0 100% 0 0);
   }
   .bar.search-open .bar-search { clip-path: inset(0 0 0 0); pointer-events: auto; }
-  /* The pill is the control now, so it carries the focus state — one halo
-     rather than the field's own border going teal underneath a separate
-     offset ring on top of it, which is what read as a heavy double border.
-     The wash is mixed from --teal rather than being a second teal. */
-  .bar-search:focus-within {
-    border-color: var(--teal);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--teal) 14%, transparent);
-  }
+  /* No focus treatment on the pill at all — asked for explicitly, twice: the
+     teal halo read as a stray green outline rather than an affordance. The
+     pill looks the same open, empty, typed-in or focused. */
   /* ...and the field inside it is bare: no border, no fill, no ring of its
      own, just text in the pill. */
   .bar .bar-search input {
