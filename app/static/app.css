@@ -2075,6 +2075,11 @@ a[target="_blank"]:active {
     height: 100%; width: 100%; padding: 0 16px;
     background: transparent; border: 0; border-radius: inherit;
     font-size: 15px; color: var(--ink);
+    /* Android's default tap highlight is a rectangle sized to the input's
+       own border-box, and it does not follow border-radius the way our own
+       focus halo does — that square tint poking past the pill's rounded
+       corners was it, not a second ring of ours. */
+    -webkit-tap-highlight-color: transparent;
   }
   .bar-search input:focus { border-color: transparent; }
   .bar-search input:focus-visible { outline: none; }
