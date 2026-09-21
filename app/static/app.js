@@ -38,15 +38,9 @@ let versionHistory = null;     // the last /api/version/history payload
  * at once on #/services, so the last one to finish is the one that lowers it. */
 let healthChecks = 0;
 let announcedVersion = null;   // the version this page was loaded against
-let viewTitle = '';            // set by the views that know a better title than the route
 let navigated = false;         // true for a hash navigation only, never for a poll
 let renderPending = false;     // a poll render held back while a field had focus
 let lastRoute = '';
-
-const TITLES = {
-  dashboard: 'Home', books: 'My Books', services: 'Services',
-  activity: 'Activity', version: 'Version history',
-};
 
 const BASE = '';
 
@@ -69,7 +63,7 @@ function stateBlock(kind, text, action = '') {
  * HTML the caller has already escaped; only the title is escaped here. */
 function pageHead(title, sub = '', crumbs = '', extra = '') {
   return `<div class="page-head">${crumbs ? `<div class="crumbs">${crumbs}</div>` : ''}` +
-    `<div class="title-row"><h1 tabindex="-1">${escapeHtml(title)}</h1>${extra}</div>` +
+    `<div class="title-row"><h1>${escapeHtml(title)}</h1>${extra}</div>` +
     `${sub ? `<div class="sub">${sub}</div>` : ''}</div>`;
 }
 
@@ -1303,14 +1297,16 @@ function viewGenres() {
   // with an empty categories table there is no folder to file anything into and
   // no area of the site that can classify. Said plainly, with what to do.
   if (!configured.length) {
-    return `<div class="panel">
-      <h2><span class="grow">Where books are filed</span></h2>
-      <div class="body"><div class="empty">
-        categories.yml defines no categories, so there is no folder for the
-        pipeline to file a book into and no notebook to route it to. Add one and
-        the next classify run will use it.
-      </div></div>
-    </div>`;
+    return `
+      ${pageHead('Genres')}
+      <div class="panel">
+        <h2><span class="grow">Where books are filed</span></h2>
+        <div class="body"><div class="empty">
+          categories.yml defines no categories, so there is no folder for the
+          pipeline to file a book into and no notebook to route it to. Add one and
+          the next classify run will use it.
+        </div></div>
+      </div>`;
   }
 
   // A selection that no longer exists — the taxonomy changed under a click, or
@@ -1340,6 +1336,8 @@ function viewGenres() {
           ${genreSources(shown)}`;
 
   return `
+    ${pageHead('Genres', `${configured.length} categor${configured.length === 1 ? 'y' : 'ies'}, ${total} book${total === 1 ? '' : 's'}`)}
+
     <div class="toolbar">
       <div class="filters">
         ${categoryTab('', 'All', total, selected)}
@@ -1389,7 +1387,6 @@ async function viewBook(id) {
   const book = detail.book;
   const placed = detail.placed || {};
   const events = detail.events || [];
-  viewTitle = `${book.title} by ${book.author || 'unknown author'}`;
 
   const rows = (state.stages || []).map(stage => {
     const run = (book.stages || {})[stage] || { status: 'pending' };
@@ -1461,7 +1458,7 @@ async function viewBook(id) {
         </div>
       </div>
       <div>
-        <h1 tabindex="-1">${escapeHtml(book.title)}</h1>
+        <h1>${escapeHtml(book.title)}</h1>
         <div class="byline"><a href="#/books" data-search="${escapeHtml(book.author || '')}">${
           escapeHtml(book.author || 'unknown author')}</a>${
           book.year ? ` <span class="faint small">· ${escapeHtml(book.year)}</span>` : ''}</div>
@@ -1645,7 +1642,6 @@ async function viewService(name) {
         '<button class="tiny" onclick="refresh()">Retry</button>');
     }
   }
-  viewTitle = d.label;
 
   const h = d.health;
 
@@ -2025,7 +2021,6 @@ async function render() {
   const token = ++renderToken;
   const r = route();
   const view = $('#view');
-  viewTitle = '';
 
   if (!state) {
     setHtml(view, stateBlock('loading', 'Loading…'));
@@ -2064,8 +2059,7 @@ async function render() {
   view.removeAttribute('aria-busy');
   lastRoute = routeKey;
 
-  const title = viewTitle || TITLES[r.name];
-  document.title = title ? title + ' | Goodreads' : 'Goodreads';
+  document.title = 'Goodreads';
   const fv = $('#footer-version');
   if (fv) fv.textContent = state.version ? 'v' + state.version : '';
 
@@ -2077,18 +2071,14 @@ async function render() {
     $('.search-toggle')?.setAttribute('aria-expanded', 'true');
   }
 
-  // A search keystroke on any route but Books calls go('/books') to get
-  // there, which fires hashchange like any other navigation and set
-  // `navigated` for exactly this block — so without the guard, typing a
-  // single character stole focus from the field being typed into and
-  // dropped it on the page's own <h1> instead, ending the keystroke.
-  if (navigated && document.activeElement !== headerSearch) {
+  // Scroll to the top of a page that was actually navigated to — not on a
+  // poll, and not on the go('/books') a search keystroke fires to get
+  // there. Used to also move keyboard focus to the page's <h1>, which stole
+  // it out of the search box on that same keystroke and, more generally,
+  // was an unannounced jump the viewer never asked for on every navigation.
+  if (navigated) {
     navigated = false;
     window.scrollTo(0, 0);
-    const h = $('#view h1[tabindex="-1"]');
-    if (h) h.focus({ preventScroll: true });
-  } else {
-    navigated = false;
   }
 }
 
