@@ -62,10 +62,31 @@
        stays under the rail on every breakpoint. -->
   <footer class="site-footer">
     <div class="site-footer-inner">
-      <div><h4>Pages</h4><a href="#/">Home</a><a href="#/books">My Books</a><a href="#/services">Services</a><a href="#/activity">Activity</a></div>
-      <div><h4>Project</h4><a href="https://github.com/ohmzi/goodreads-pipeline" target="_blank" rel="noopener">GitHub</a><a href="https://github.com/ohmzi/goodreads-pipeline/blob/main/docs/VERSION.md" target="_blank" rel="noopener">Release notes</a><a href="#/version">Version history</a></div>
-      <div><h4>Session</h4><a href="/goodreads">Sign in to Goodreads</a><a href="#" onclick="signOut();return false;">Sign out</a></div>
-      <div class="legal">© 2026 goodreads-pipeline · self-hosted<br><a id="footer-version" href="#/version"></a></div>
+      <nav class="site-footer-links" aria-label="Footer">
+        <div>
+          <h4>Pages</h4>
+          <a href="#/">Home</a>
+          <a href="#/books">My Books</a>
+          <a href="#/genres">Genres</a>
+          <a href="#/services">Services</a>
+          <a href="#/activity">Activity</a>
+        </div>
+        <div>
+          <h4>Project</h4>
+          <a href="https://github.com/ohmzi/goodreads-pipeline" target="_blank" rel="noopener">GitHub</a>
+          <a href="https://github.com/ohmzi/goodreads-pipeline/blob/main/docs/VERSION.md" target="_blank" rel="noopener">Release notes</a>
+          <a href="#/version">Version history</a>
+        </div>
+        <div>
+          <h4>Session</h4>
+          <a href="/goodreads">Sign in to Goodreads</a>
+          <a href="#" onclick="signOut();return false;">Sign out</a>
+        </div>
+      </nav>
+      <div class="site-footer-meta">
+        <p class="site-footer-copy">© 2026 goodreads-pipeline — self-hosted, not affiliated with Goodreads or Amazon</p>
+        <a class="site-footer-version" id="footer-version" href="#/version"></a>
+      </div>
     </div>
   </footer>
 </div>

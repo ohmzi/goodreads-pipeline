@@ -343,8 +343,13 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
   display: grid; grid-template-columns: minmax(0, 1fr) var(--rail);
   gap: var(--gutter); align-items: start;
 }
-/* The version page and the sign-in page have no rail of their own. */
+/* Every page but the dashboard has no rail of its own: service status and
+   run control (sweep now, check shelf, auto-shelve) are dashboard-only now,
+   so `.rail` is emptied by renderRail() and hidden here rather than left to
+   auto-flow into a second row — a single grid column alone would not remove
+   it from the DOM, just push it below `.col`. */
 .page.single { grid-template-columns: minmax(0, 1fr); }
+.page.single .rail { display: none; }
 
 /* Grid items default to min-width:auto, so one unbroken token — a pipeline
    path, a release hash in .mono, a long title — would push its track wider than
@@ -544,9 +549,15 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
    account block to the right edge. */
 .spacer { flex: 1; }
 
-/* Only shown under 1000px (see the breakpoints section), where the search box
-   drops to its own row behind a toggle instead of narrowing forever. */
-.search-toggle { display: none; }
+/* Only shown under 780px (see the breakpoints section), where the search box
+   is a bare icon until tapped instead of a box narrowed to the point of being
+   useless. Bare button, same geometry as .menu-toggle beside it. */
+.search-toggle {
+  display: none; align-items: center; justify-content: center;
+  width: 32px; height: 32px; padding: 0; margin: 0 4px 0 0;
+  border: 0; background: none; color: var(--bar-ink); cursor: pointer;
+}
+.search-toggle svg { width: 20px; height: 20px; }
 
 /* display:contents above 780px: the health pill and sign-out sit inline in
    .bar-inner exactly as if this wrapper were not there at all — it exists
@@ -620,22 +631,40 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
    Sibling of .page, not a cell in it (see index.html): it spans the full
    width and sits under the rail at every breakpoint, in place of the page
    just ending. --bar is the same light fill the header bar uses (their own
-   .siteHeader__topLine), so the two bookend the page in the same tone. */
-.site-footer { background: var(--bar); padding: 32px 0; margin-top: 24px; }
-.site-footer-inner {
-  max-width: var(--header-max); margin: 0 auto; padding: 0 5px;
-  display: grid; grid-template-columns: repeat(3, 1fr) 1fr; gap: var(--gutter);
+   .siteHeader__topLine), so the two bookend the page in the same tone.
+
+   Two rows, not four columns: the three link groups are navigation and share
+   a row; the copyright and version link are meta, not navigation, so they
+   sit below a hairline instead of competing with nav for a fourth grid
+   column. A flat 4-column grid had no mobile step, so a short group
+   ("Session") was forced as wide as "Project" and "Sign in to Goodreads"
+   wrapped mid-phrase on a phone; splitting nav from meta lets each collapse
+   on its own at 780px (see the breakpoints section) instead of just
+   narrowing the same cramped columns. */
+.site-footer { background: var(--bar); padding: 28px 0 24px; margin-top: 24px; }
+.site-footer-inner { max-width: var(--header-max); margin: 0 auto; padding: 0 5px; }
+
+.site-footer-links {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gutter);
 }
 .site-footer h4 {
   margin: 0 0 10px; font: 700 12px/18px var(--sans);
   text-transform: uppercase; letter-spacing: .3px; color: var(--bar-ink);
 }
-.site-footer a { display: block; font: 14px/21px var(--sans); color: var(--bar-ink); text-decoration: none; }
-.site-footer a:hover { text-decoration: underline; color: var(--bar-ink); }
+.site-footer-links a { display: block; font: 14px/21px var(--sans); color: var(--bar-ink); text-decoration: none; }
+.site-footer-links a:hover { text-decoration: underline; color: var(--bar-ink); }
+
+.site-footer-meta {
+  display: flex; align-items: baseline; justify-content: space-between; gap: var(--gutter);
+  margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line-warm);
+}
 /* --muted, not --faint: --faint measures 4.29:1 on --bar and fails §7, the
    same reason .bar-account .who takes --muted instead a few lines up. */
-.site-footer .legal { text-align: right; font: 14px/21px var(--sans); color: var(--muted); }
-.site-footer .legal a { display: inline; color: var(--teal); }
+.site-footer-copy { margin: 0; font: 14px/21px var(--sans); color: var(--muted); }
+.site-footer-version { font: 14px/21px var(--sans); color: var(--teal); text-decoration: none; }
+.site-footer-version:hover { color: var(--teal-dark); text-decoration: underline; }
+.site-footer-version:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+.site-footer-version:empty { display: none; }   /* before app.js sets its text on first render */
 
 /* ============================================================ the controls
  *
@@ -1902,13 +1931,6 @@ a[target="_blank"]:active {
 .signin #submit:active {
   background: var(--value); border-color: var(--value); color: var(--line-warm);
 }
-/* .signup is outlined on white, so it can press the ordinary way: one step down
-   the cream ramp to --cream-3, the fill .gr-button:hover uses, with the border
-   already at its darkest from :hover. #181818 on #ede6d6 is 14.1:1. */
-.signin .signup:active {
-  background: var(--cream-3); border-color: var(--ink-2); color: var(--ink);
-}
-
 /* ============================================================ breakpoints
  *
  * Every @media block in the file, and nothing else — all five breakpoints live
@@ -1996,26 +2018,37 @@ a[target="_blank"]:active {
 }
 
 /* ====================================================== max-width: 780px */
-/* The header at phone width. Goodreads deletes its navbar search below 767px
-   (ref §4 .searchBox--navbar{display:none}); the app keeps it, because the
-   search box is how a book is reached at all. What no longer fits on one row
-   with the wordmark and a usable search box is the health pill and the
-   sign-out link, so those two collapse behind .menu-toggle instead of forcing
-   a third row: row one is the wordmark, search and that button, row two is
-   the nav as a strip that scrolls sideways rather than breaking to two rows. */
+/* The header at phone width, after their own native app rather than their
+   desktop navbar: a bare search icon at the left, the wordmark truly
+   centred (not just centred-in-the-leftover-space — see .wordmark below),
+   and .menu-toggle standing in for their avatar as the one status/account
+   control this app has. Tapping the icon swaps the whole row for the real
+   input, the same .search-open toggle .search-toggle already drove when
+   search sat inline; row two is the nav as its own strip below, unchanged. */
 @media (max-width: 780px) {
-  .bar-inner { height: auto; flex-wrap: wrap; padding: 8px 12px; }
-  /* The wordmark is an SVG at a fixed 140×30 now (ref §3), so there is no type
-     step left to take here — the old `font-size:19px` retired with the text. */
-  .nav { order: 3; width: 100%; overflow-x: auto; }
-  .nav a { padding: 0 11px; font-size: 14px; line-height: 40px; }
-  /* Not order:2 any more — search stays on row one now that the pill and
-     sign-out are out of its way, so it no longer needs a row of its own. */
-  .bar-search { order: 1; flex: 1; min-width: 0; max-width: none; margin: 0 4px; }
-  /* Its job (push search/pill/account to the right edge) is redundant once
-     .bar-search is itself flex:1 and fills whatever room is left. */
-  .spacer { display: none; }
+  .bar-inner { position: relative; height: auto; flex-wrap: wrap; padding: 8px 12px; justify-content: space-between; }
+  /* True centring, not flex centring: .search-toggle and .menu-toggle are
+     different widths (a bare 32px icon vs. a dot-plus-chevron button), so
+     splitting the row in two around a flex-basis wordmark would put it
+     visibly off-centre toward the wider side. Taking it out of flow and
+     centring on the row itself is what the reference actually shows. */
+  .wordmark {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  }
+  .search-toggle { display: flex; order: 0; }
+  .bar-search { display: none; order: 1; }
   .menu-toggle { display: flex; order: 2; }
+  .spacer { display: none; }
+  .nav { order: 3; width: 100%; overflow-x: auto; }
+  .nav a { padding: 0 14px; font-size: 15px; line-height: 52px; }
+
+  /* Search open: the icon becomes the way back (tapping it again closes,
+     via the same toggleSearch() call), the wordmark and the status button
+     step aside, and the input takes the whole row. */
+  .bar.search-open .wordmark, .bar.search-open .menu-toggle { display: none; }
+  .bar.search-open .bar-search {
+    display: flex; align-items: center; flex: 1; min-width: 0; max-width: none; margin: 0 4px 0 8px;
+  }
 
   /* The dropdown .menu-toggle opens. Anchored to the header's own edge, not
      to the button, because the button's position shifts with the search
@@ -2032,6 +2065,13 @@ a[target="_blank"]:active {
   .bar.menu-open .bar-account { padding-left: 0; justify-content: center; }
 
   .page { padding: 12px; }
+
+  /* The footer's two rows collapse independently: nav to one column (three
+     short lists stacked read better than three squeezed side by side), meta
+     to a stacked pair (the copyright line no longer has to share a row with
+     the version link at a width too narrow for both). */
+  .site-footer-links { grid-template-columns: 1fr; gap: 20px; }
+  .site-footer-meta { flex-direction: column; align-items: flex-start; gap: 6px; }
 
   .bookpage { grid-template-columns: 1fr; }
   .bookpage .cover-lg { width: 130px; }

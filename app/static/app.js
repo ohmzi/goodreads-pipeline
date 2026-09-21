@@ -481,13 +481,34 @@ function renderBanner() {
   setHtml(host, '');
 }
 
-/* The right rail. Service health north-star: on every page, without a click,
- * so "which one broke" is answerable by looking rather than navigating. */
+/* Sweep now / Check shelf / auto-shelve — shared between the dashboard rail
+ * and the Activity page, which wants the same controls above its own log. */
+function runControlBody() {
+  return `
+    <div class="rail-actions">
+      <button class="tiny" onclick="sweepNow(this)">Sweep now</button>
+      <button class="tiny" onclick="reconcileNow(this)">Check shelf</button>
+    </div>
+    <label class="rail-check">
+      <input type="checkbox" ${state?.auto_shelve ? 'checked' : ''}
+             onchange="setAutoShelve(this.checked)">
+      <span>Move finished books to a collected shelf</span>
+    </label>
+    ${state?.disk_free_gb != null ? `<p class="rail-note">
+      <b>${state.disk_free_gb} GB</b> free where books land</p>` : ''}`;
+}
+
+/* The right rail: service status and run control. Dashboard-only — every
+ * other page gets `.page.single` instead (see render()), which is what
+ * actually hides `.rail`; emptying it here as well is what stops a stale
+ * card surviving a route change render() skips (an awaited book/service/
+ * version route that never reaches this call before the user navigates on). */
 function renderRail() {
   const host = $('#rail');
   if (!host) return;
-  const health = state?.health || { services: [] };
   const { name, param } = route();
+  if (name !== 'dashboard') { setHtml(host, ''); return; }
+  const health = state?.health || { services: [] };
   const current = name === 'service' ? canonicalService(param) : '';
 
   // While a re-check is in flight every service row says "testing…" instead of
@@ -556,33 +577,14 @@ function renderRail() {
 
     <div class="rail-card">
       <h3>Run control</h3>
-      <div class="body">
-        <div class="rail-actions">
-          <button class="tiny" onclick="sweepNow(this)">Sweep now</button>
-          <button class="tiny" onclick="reconcileNow(this)">Check shelf</button>
-        </div>
-        <label class="rail-check">
-          <input type="checkbox" ${state?.auto_shelve ? 'checked' : ''}
-                 onchange="setAutoShelve(this.checked)">
-          <span>Move finished books to a collected shelf</span>
-        </label>
-        ${state?.disk_free_gb != null ? `<p class="rail-note">
-          <b>${state.disk_free_gb} GB</b> free where books land</p>` : ''}
-      </div>
+      <div class="body">${runControlBody()}</div>
       <div class="rail-foot">
-        <a class="sidebar-version" href="#/version">
-          <span class="vnum">v${escapeHtml(versionHistory?.current || '1.0.0')}</span>
-          What's new<span class="new-dot"></span>
+        <a class="sidebar-version${unread ? ' unread' : ''}" href="#/version"
+           title="${unread ? 'New in this version' : 'Version history'}">
+          ${ver ? `<span class="vnum">v${escapeHtml(ver)}</span>` : ''}What's new${
+            unread ? '<span class="new-dot" aria-hidden="true"></span><span class="sr-only"> (new)</span>' : ''}
         </a>
       </div>
-    </div>
-
-    <div class="rail-foot">
-      <a class="sidebar-version${unread ? ' unread' : ''}" href="#/version"
-         title="${unread ? 'New in this version' : 'Version history'}">
-        ${ver ? `<span class="vnum">v${escapeHtml(ver)}</span>` : ''}What's new${
-          unread ? '<span class="new-dot" aria-hidden="true"></span><span class="sr-only"> (new)</span>' : ''}
-      </a>
     </div>`);
 }
 
@@ -1715,6 +1717,10 @@ function viewActivity() {
   return `
     ${pageHead('Activity', `${events.length} recent events`)}
     <div class="panel">
+      <h2>Run control</h2>
+      <div class="body">${runControlBody()}</div>
+    </div>
+    <div class="panel">
       <div class="body flush log">${renderEvents(events)}</div>
     </div>`;
 }
@@ -1729,50 +1735,9 @@ async function viewVersion() {
         '<button class="tiny" onclick="refresh()">Retry</button>');
     }
   }
-  // Reading the page is what marks the release as seen; the rail pill clears
-  // on the next render.
+  // Reading the page is what marks the release as seen; the rail/run-control
+  // pill clears on the next render.
   try { localStorage.setItem('gr.seenVersion', d.current); } catch {}
-
-  // On a phone an open area pushes the next release off the screen entirely.
-  const narrow = matchMedia('(max-width: 780px)').matches;
-  const releases = d.releases || [];
-
-  const entries = releases.map((rel, idx) => {
-    const isCurrent = majorMinor(rel.version) === majorMinor(d.current);
-    const open = idx === 0 && !narrow;
-    return `<section class="version-entry" id="rel-${escapeHtml(String(rel.version).replace(/\./g, '-'))}">
-      <div class="vhead">
-        <h2 class="vnum">v${escapeHtml(isCurrent ? d.current : rel.version)}</h2>
-        <time class="vdate" datetime="${escapeHtml(rel.date || '')}">${escapeHtml(fmtDate(rel.date))}</time>
-        ${isCurrent ? '<span class="vtag">current</span>' : ''}
-      </div>
-      ${rel.summary ? `<p class="vsummary">${escapeHtml(rel.summary)}</p>` : ''}
-      ${(rel.sections || []).map(sec => {
-        const items = sec.items || [];
-        return `<details class="varea"${open ? ' open' : ''}>
-          <summary><h3>${escapeHtml(sec.heading)}</h3>
-            <span class="vcount">${items.length} change${items.length === 1 ? '' : 's'}</span></summary>
-          <ul class="vchanges">${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>
-        </details>`;
-      }).join('')}
-    </section>`;
-  }).join('');
-
-  return `<div class="version-page">${
-    pageHead('Version history', `Running v${escapeHtml(d.current || '?')} · ${releases.length} release${releases.length === 1 ? '' : 's'}`)
-  }<div class="version-list">${entries || stateBlock('empty', 'No releases recorded.')}</div></div>`;
-}
-
-/* ------------------------------------------------------------- version */
-async function viewVersion() {
-  let d = versionHistory;
-  if (!d) {
-    try { d = await api('/api/version/history'); versionHistory = d; }
-    catch (err) {
-      return `<div class="panel"><div class="body">
-        Could not load version history: ${escapeHtml(err.message)}</div></div>`;
-    }
-  }
 
   const entries = (d.releases || []).map(rel => `
     <div class="version-entry">
@@ -1789,11 +1754,10 @@ async function viewVersion() {
     </div>`).join('');
 
   return `
+    ${pageHead('Version history', `Running v${escapeHtml(d.current || '?')}`)}
     <div class="panel">
-      <h2><span class="grow">Version history</span>
-        <span class="chip ok">v${escapeHtml(d.current || '?')}</span></h2>
       <div class="body">
-        <div class="version-page">${entries || '<div class="muted">No releases recorded.</div>'}</div>
+        <div class="version-page">${entries || stateBlock('empty', 'No releases recorded.')}</div>
       </div>
     </div>`;
 }
@@ -2045,6 +2009,10 @@ async function render() {
   else html = viewDashboard();
 
   if (token !== renderToken) return;   // a newer render won
+
+  // Service status and run control are dashboard-only; every other route
+  // takes the rail's column back for its own content instead.
+  $('#page')?.classList.toggle('single', r.name !== 'dashboard');
 
   renderMasthead();
   renderBanner();

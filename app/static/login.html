@@ -18,20 +18,19 @@
 
      Geometry is the measured real page (see the measurements this was built
      against): a 350px column, the wordmark 29px below the top of the viewport,
-     a 38px serif heading, 37px pill inputs and a 39px pill button, then the
-     tail the real page has — legal paragraph, keep-signed-in row, "New to
-     Goodreads?" rule, an outlined Sign up pill, footer links and the
-     copyright line.
+     a 38px serif heading, 37px pill inputs and a 39px pill button.
 
-     Three pieces of the real page have nothing behind them here, and none of
-     them pretends otherwise:
-       - Sign up: there is no registration. The button is real, and pressing it
-         says where accounts actually come from.
-       - Terms of Service / Privacy Policy / the footer links: no such pages
-         exist, so they are styled as the real ones are — same ink, no
-         underline — but they are text, not anchors, so nothing 404s.
-       - The real "Details" popover explains the keep-signed-in cookie. Ours
-         does too, for the cookie this app actually sets. */
+     The tail is deliberately NOT the real page's: their legal paragraph, "New
+     to Goodreads?" rule and outlined Sign up pill are Goodreads-onboarding
+     chrome a single-operator self-hosted tool has no use for — the paragraph
+     would assert a real Terms/Privacy relationship that does not exist, and
+     the account-creation command the Sign up button would reveal is already
+     shown one field up, under Password assistance, so keeping both would only
+     duplicate it. What survives past the button is the "Keep me signed in"
+     row (it explains a control actually on the page) and one honest line in
+     place of the real page's copyright: this is self-hosted, not Goodreads or
+     Amazon, with a real link to the source instead of a fabricated "©
+     Goodreads LLC" beside links to nowhere. */
 
   /* ---- frame ---- */
   body {
@@ -126,23 +125,15 @@
   }
   #error:empty { display: none; }
 
-  /* ---- legal paragraph: 15px on a 23px line, left aligned, wrapping at the
-     column edge just as theirs does. Its two links are the same ink as the body
-     text and underlined — which is how the real page draws them, and what the
-     two spans here copy. They carry no href: those pages do not exist. ---- */
-  .legal {
-    margin: 30px 0 0;
-    font-size: 15px; line-height: 23px; color: var(--ink);
-  }
-  .legal-link { text-decoration: underline; }
-
   /* ---- keep me signed in ---------------------------------------------------
      Starts 6px in from the column edge, as theirs does, with a 13px box on the
      text's centre line. The checkbox is real: the form posts it and the server
-     issues a 12-hour session instead of the full one. */
+     issues a 12-hour session instead of the full one. Margin is the ~30px the
+     real page opens this section with — there is no legal paragraph above it
+     any more to set that gap instead. */
   .keep {
     display: flex; align-items: center; gap: 6px;
-    padding-left: 6px; margin: 17px 0 0;
+    padding-left: 6px; margin: 28px 0 0;
     font-size: 14px; color: var(--ink);
   }
   .keep input[type="checkbox"] {
@@ -150,43 +141,16 @@
   }
   .keep label { cursor: pointer; }
 
-  /* ---- "New to Goodreads?" rule: two 1px hairlines either side of the words,
-     ~7px of air between rule and text. ---- */
-  .divider { display: flex; align-items: center; gap: 7px; margin: 52px 0 0; }
-  .divider::before, .divider::after {
-    content: ""; flex: 1; height: 1px; background: var(--line);
-  }
-  .divider span { font-size: 12px; line-height: 1; color: var(--ink-2); }
-
-  /* ---- Sign up: outlined, not filled, same pill as the button above ---- */
-  .signup {
-    display: block; width: 100%; height: 40px; margin: 16px 0 0;
-    font-family: var(--sans); font-size: 14px; font-weight: 400;
-    color: var(--ink); background: var(--paper);
-    border: 1px solid var(--faint); border-radius: 20px; cursor: pointer;
-  }
-  .signup:hover { border-color: var(--ink-2); background: var(--paper); }
-  .signup:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
-  .signup-note {
-    margin: 10px 0 0; padding: 9px 11px;
-    background: var(--cream); border: 1px solid var(--line-warm); border-radius: 6px;
-    font-size: 12.5px; line-height: 1.5; color: var(--muted);
-  }
-  .signup-note code {
-    display: block; margin-top: 6px;
-    font-family: var(--mono); font-size: 12px; color: var(--ink-2);
-    overflow-wrap: anywhere;
-  }
-
-  /* ---- footer: three links on one line, the copyright in the lighter grey
-     beneath them. The links are text, not anchors: none of those pages exist
-     here, and theirs read as plain dark ink anyway. ---- */
-  .foot { margin: 80px 0 0; text-align: center; }
-  .foot-links {
-    display: flex; flex-wrap: wrap; justify-content: center; gap: 28px;
-    margin: 0; font-size: 14px; color: var(--bar-ink);
-  }
-  .foot-copy { margin: 10px 0 0; font-size: 14px; color: var(--faint); }
+  /* ---- footer: one honest line, not the real page's copyright-plus-three-
+     inert-links. Never Goodreads or Amazon; a real link to the source
+     instead of nowhere. Margin is the ~48px this now needs to clear the
+     Details note, well short of the 80px that used to clear a divider and a
+     Sign up button neither of which exist any more. ---- */
+  .foot { margin: 48px 0 0; text-align: center; }
+  .foot-copy { margin: 0; font-size: 14px; color: var(--faint); }
+  .foot-link { color: var(--teal); text-decoration: none; }
+  .foot-link:hover { color: var(--teal-dark); text-decoration: underline; }
+  .foot-link:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 </style>
 </head>
 <body>
@@ -216,12 +180,6 @@
     <p id="error" role="alert"></p>
   </form>
 
-  <!-- Theirs are links to pages this app does not have, so they carry their
-       ink and nothing else: text, not anchors. -->
-  <p class="legal">By signing in, you agree to the Goodreads
-    <span class="legal-link">Terms of Service</span> and
-    <span class="legal-link">Privacy Policy</span></p>
-
   <div class="keep">
     <input type="checkbox" id="keep" name="keep" checked>
     <label for="keep">Keep me signed in.</label>
@@ -234,20 +192,9 @@
     a growing delay — a correct password always gets through.
   </p>
 
-  <div class="divider"><span>New to Goodreads?</span></div>
-
-  <button type="button" class="signup" id="signup" aria-expanded="false"
-          aria-controls="signup-note">Sign up</button>
-  <p class="signup-note" id="signup-note" hidden>
-    There is no registration here — accounts are made on the server:
-    <code>python -m app.cli set-password &lt;username&gt;</code>
-  </p>
-
   <footer class="foot">
-    <p class="foot-links">
-      <span>Terms of Service</span><span>Privacy</span><span>Help</span>
-    </p>
-    <p class="foot-copy">© 2026 Goodreads LLC</p>
+    <p class="foot-copy">Self-hosted · not Goodreads or Amazon ·
+      <a class="foot-link" href="https://github.com/ohmzi/goodreads-pipeline" target="_blank" rel="noopener">source on GitHub</a></p>
   </footer>
 </main>
 
@@ -268,7 +215,6 @@ function disclosure(button, panel) {
 }
 disclosure(document.getElementById('assist'), document.getElementById('assist-body'));
 disclosure(document.getElementById('details'), document.getElementById('details-body'));
-disclosure(document.getElementById('signup'), document.getElementById('signup-note'));
 
 fetch('/api/auth/status')
   .then(r => r.json())
