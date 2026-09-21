@@ -21,9 +21,10 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import models
+from . import breaker, models
 from .clients.base import ClientError
 from .db import db
+from .health import canonical, service_for_stage
 from .stages import REGISTRY, discover
 
 #: A stage may run once its prerequisites reach one of these.
@@ -78,6 +79,12 @@ SWEEP_WARN_SECONDS = 300
 #: How long a service may be transiently broken before its failures become a
 #: book's problem. A full day covers an upstream outage or a quota that resets
 #: daily, which is the realistic worst case here.
+#:
+#: This answers "has this book been failing long enough to be a real problem",
+#: which is a different question from the breaker's "is this service usable
+#: right now" — see `breaker`'s module docstring. They never both run for one
+#: failure: while the breaker holds a service, `_forgive_transient` is not
+#: reached at all.
 TRANSIENT_GRACE_HOURS = 24
 
 
@@ -88,6 +95,12 @@ TRANSIENT_GRACE_HOURS = 24
 #: time budget. Measured: one book per 120s, which is twelve hours for three
 #: hundred and fifty. The work is almost entirely network waiting, so running
 #: several books at once costs nothing and divides the wall-clock accordingly.
+#:
+#: Six concurrent searches is also what makes a 429 from a struggling source
+#: likely, and that is deliberately *not* fixed by lowering this number:
+#: throttling here would slow every healthy sweep to pay for an outage. The
+#: breaker is the fix — once a service is held it runs zero books at a time,
+#: which is a sharper version of the same idea and reverts by itself.
 ADVANCE_WORKERS = 6
 
 
@@ -134,7 +147,8 @@ class Scheduler:
             self._sweep_lock.release()
 
     def _sweep(self, force_discover: bool) -> dict:
-        summary = {"discover": None, "advanced": 0, "parked": 0, "books": 0, "health": None}
+        summary = {"discover": None, "advanced": 0, "parked": 0, "held": 0,
+                   "books": 0, "health": None, "breaker": {}}
 
         now = time.time()
 
@@ -149,6 +163,16 @@ class Scheduler:
                 summary["health"] = check_all()
             except Exception as exc:  # noqa: BLE001
                 db().log(f"health check failed: {exc}", level="error")
+
+        # An outage that parked books before the breaker existed — or before
+        # this process started — is invisible to it: a parked book is never
+        # attempted again, so it can never feed a failure in. Adopting the
+        # recent backlog is what lets the breaker open on an outage it did not
+        # witness, and the trip reclaims those rows, so it cannot fire twice.
+        try:
+            summary["breaker_adopted"] = breaker.adopt_backlog()
+        except Exception as exc:  # noqa: BLE001
+            db().log(f"breaker backlog adoption failed: {exc}", level="error")
 
         if force_discover or (now - self._last_discover) > DISCOVER_INTERVAL_SECONDS:
             self._last_discover = now
@@ -185,6 +209,10 @@ class Scheduler:
         started = time.time()
         spent = 0
 
+        # One snapshot of "which services are held" for the whole sweep, passed
+        # to every worker. See `breaker.holding` for why a snapshot is safe.
+        holding = breaker.holding()
+
         # Advance several books concurrently: the stages are I/O-bound, and a
         # serial sweep spent its whole budget on one slow search.
         with concurrent.futures.ThreadPoolExecutor(
@@ -199,7 +227,7 @@ class Scheduler:
                         book = next(queue)
                     except StopIteration:
                         break
-                    pending[pool.submit(self._advance, book)] = book
+                    pending[pool.submit(self._advance, book, holding)] = book
                     over_budget = (time.time() - started) >= SWEEP_BUDGET_SECONDS
 
                 if not pending:
@@ -222,6 +250,8 @@ class Scheduler:
                         summary["advanced"] += 1
                     elif outcome == "parked":
                         summary["parked"] += 1
+                    elif outcome == "held":
+                        summary["held"] += 1
 
                 if (time.time() - started) >= SWEEP_BUDGET_SECONDS and not pending:
                     break
@@ -232,6 +262,12 @@ class Scheduler:
         summary["stages_run"] = spent
         summary["deferred"] = max(0, len(books) - summary["books"])
         summary["seconds"] = round(elapsed, 1)
+        # So a quiet sweep explains itself: "held" counts books whose only
+        # runnable stage was refused by the breaker, and the state map says
+        # which services are holding.
+        summary["breaker"] = {
+            name: row["state"] for name, row in breaker.states().items()
+        }
         if elapsed > SWEEP_WARN_SECONDS:
             db().log(
                 f"sweep took {elapsed:.0f}s for {summary['books']} book(s) — "
@@ -241,14 +277,17 @@ class Scheduler:
         self.last_result = summary
         return summary
 
-    def _advance(self, book: dict) -> tuple[str, int]:
+    def _advance(self, book: dict, holding: dict | None = None) -> tuple[str, int]:
         """Run every stage of one book that is ready to run.
 
         Returns (outcome, stages_executed) so the caller can budget its pass.
+        `holding` is this sweep's snapshot of the breaker (`breaker.holding`).
         """
         book_id = book["id"]
         stages: dict = book.get("stages") or {}
+        holding = holding or {}
         advanced = False
+        held = 0
         ran = 0
 
         for stage in models.STAGES:
@@ -283,6 +322,27 @@ class Scheduler:
             if not self._prereqs_met(stages, stage):
                 continue
 
+            # A service the breaker holds is not attempted at all, so no book
+            # can be written off for it and the sweep stops grinding. This is
+            # checked before the stage runs, which is the whole point: `busy`
+            # and `server` failures cost an upstream search each, and during a
+            # rate limit every extra search digs the hole deeper.
+            svc = service_for_stage(stage)
+            probe = ""
+            if svc and holding.get(svc):
+                # `claim_probe` answers True when the breaker is actually
+                # closed (this snapshot was stale) or when this book has just
+                # taken the half-open probe — and only one book per service
+                # ever gets that.
+                if not breaker.claim_probe(svc, book_id, stage):
+                    row = stages.get(stage) or {}
+                    if row.get("status") != models.BLOCKED or row.get("held_by") != svc:
+                        db().mark_held(book_id, stage, svc, breaker.hold_detail(svc))
+                        stages[stage] = db().stage(book_id, stage) or {}
+                    held += 1
+                    continue
+                probe = svc
+
             runner = REGISTRY.get(stage)
             if runner is None:
                 continue
@@ -300,9 +360,104 @@ class Scheduler:
                     f"unhandled error: {exc}",
                     kind=exc.kind if isinstance(exc, ClientError) else "",
                     service=exc.service if isinstance(exc, ClientError) else "",
+                    retry_after=exc.retry_after if isinstance(exc, ClientError) else None,
                 )
 
+            # Captured before any downgrade below: the probe's verdict is about
+            # the *raw* result. `hold()` clears `kind`, so reading it afterwards
+            # would report every probe as answered and close the breaker on the
+            # very failure that proves the service is still down.
+            #
+            # That is not enough on its own: a stage that holds a book by itself
+            # (`acquire._run` does, the moment it sees the breaker holding)
+            # never produces a result with a transient kind at all, so there is
+            # no raw kind left to read. `refused_probe` below is the rest of the
+            # verdict — a hold *on the probed service* is the stage saying the
+            # service would not serve it, which is not an answer.
+            #
+            # `answered_probe` is `breaker.probe_verdict` rather than "not
+            # transient" for the same reason: the verdict it replaces treated
+            # every non-transient failure as the service answering, including
+            # the ones that never reached it. A probe refused by our own disk
+            # check (`acquire._queue` measures free space before it searches)
+            # closed the breaker having asked nothing, and the next sweep ran
+            # every book against a dead service.
+            #
+            # The verdict is not read off `kind` alone any more, because `data`
+            # is both "the service answered and has nothing" and "we never
+            # asked"; the stage carries that answer on the result now
+            # (`StageResult.answered`), and `probe_verdict` is the one reader.
+            was_transient = result.kind in breaker.TRANSIENT_KINDS
+            refused_probe = bool(
+                probe and result.status == models.BLOCKED
+                and result.held_by == probe
+            )
+            answered_probe = breaker.probe_verdict(result, refused_probe)
+
+            # Ordering here is load-bearing: `record_failure` runs *before*
+            # `mark_done`, so the trip's reclaim cannot race the row this worker
+            # is about to write. The breaker trips, reclaims the rows that are
+            # already `failed`, and this result is downgraded and written as
+            # held instead of failed. The other way round, every worker in
+            # flight at the moment of the trip would add a fresh `failed` row
+            # *after* the reclaim and the panel would keep a tail of them.
+            if result.status == models.FAILED and was_transient and result.service:
+                blamed = canonical(result.service)
+                breaker.record_failure(blamed, result.detail,
+                                       retry_after=result.retry_after)
+                if breaker.is_holding(blamed):
+                    # Not this book's fault, and not this book's failure: the
+                    # service is down, so the row is written held rather than
+                    # failed. `recorded=True` because the call three lines up
+                    # was this failure's record, so the probe block below has
+                    # nothing left to send.
+                    result = breaker.hold(result, blamed, recorded=True)
+
             db().mark_done(book_id, stage, result)
+
+            if result.status == models.BLOCKED and result.held_by:
+                # A stage can hold a book by itself, before this sweep's
+                # snapshot knew the breaker was open (see `acquire._run`). It
+                # is still a book the breaker refused, and it has to be counted
+                # like one, or the very sweep the outage started would report
+                # `held=0` while ten books sat held — the sweep summary would
+                # be the one place the outage was invisible.
+                held += 1
+
+            if probe:
+                if refused_probe and not result.recorded:
+                    # The belt to the stage's braces, and only for a hold the
+                    # stage did not take on the breaker's behalf. That is read
+                    # off `result.recorded`, which the holder sets when it has
+                    # already fed this failure to `record_failure` — not off
+                    # `kind` being empty, which is how it used to be inferred
+                    # and which answers a different question: `acquire._run`
+                    # holds with an empty `kind` *because* it recorded, but a
+                    # stage that holds without recording also produces an empty
+                    # `kind` through `hold()`'s clearing, and was silently read
+                    # as having recorded.
+                    #
+                    # Recording a probe twice is not a state bug — the verdict
+                    # below does not depend on this call — it is a *message*
+                    # bug, and the message is what the operator reads.
+                    # `result.detail` here is the *held* sentence, and
+                    # `hold_detail()` embeds `last_failure` verbatim, so the
+                    # second call replaces the upstream's own words with our
+                    # wrapper around them, nested inside another copy on every
+                    # book marked held after the probe in the same sweep. With
+                    # `recorded` the belt is a real one: an unrecorded hold now
+                    # gets recorded (which is the point of the belt), and the
+                    # one stage shape that has been measured does not.
+                    breaker.record_failure(probe, result.detail,
+                                           retry_after=result.retry_after)
+                breaker.resolve_probe(
+                    probe, answered=answered_probe,
+                    retry_after=result.retry_after,
+                )
+            elif result.status == models.OK and result.service:
+                # Only ever an `ok`: see `breaker.record_success` for why a
+                # blocked result must never be fed back here.
+                breaker.record_success(canonical(result.service))
 
             # A service being briefly unreachable or briefly broken is not a
             # book-level failure. Restarting Shelfmark produced 53 books marked
@@ -311,7 +466,10 @@ class Scheduler:
             # later. Anything transient is forgiven on a *clock* — see
             # `_forgive_transient` — so a service that is genuinely broken
             # still surfaces, but a busy one does not write off books.
-            if result.status == models.FAILED and result.kind in ("network", "server"):
+            #
+            # Reachable only when the breaker is *not* holding: a held failure
+            # was downgraded above, so it is no longer FAILED.
+            if result.status == models.FAILED and result.kind in breaker.TRANSIENT_KINDS:
                 forgiven = self._forgive_transient(book_id, stage, result)
                 if forgiven is not None:
                     result = forgiven
@@ -323,6 +481,11 @@ class Scheduler:
                     level="error",
                     book_id=book_id,
                     stage=stage,
+                    # Recorded rather than left to be guessed: the service page
+                    # used to recover this by substring-matching the service's
+                    # name in the message, which is why the operator's activity
+                    # page could not show this outage as Shelfmark's.
+                    service=canonical(result.service),
                 )
             elif result.status == models.OK:
                 db().log(
@@ -370,6 +533,11 @@ class Scheduler:
 
         if advanced:
             return "advanced", ran
+        if held:
+            # Every stage this book could have run was refused by the breaker.
+            # Counted by the caller like `parked`, so a sweep of held books
+            # reads as "held", not as "nothing happened".
+            return "held", ran
         return ("ran" if ran else "idle"), ran
 
     def _forgive_transient(
@@ -382,6 +550,14 @@ class Scheduler:
         attention. Time is the right measure: how long something has been
         broken separates "busy for a moment" from "actually down", whereas a
         retry *count* is exhausted in minutes by an outage lasting hours.
+
+        This measures one book's patience; `breaker` measures whether the
+        service is usable at all. They are deliberately separate and never both
+        run for one failure — while the breaker holds a service this is not
+        reached, because that failure was already downgraded to a hold, and the
+        breaker's clock has to reset this one's `transient_since` when it
+        closes or a book held through a long outage would park the moment it
+        ended. See `breaker`'s module docstring.
         """
         count, since = db().bump_transient(book_id, stage)
         down_for = db().transient_age_hours(since)
