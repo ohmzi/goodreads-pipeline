@@ -56,6 +56,12 @@ CREATE TABLE IF NOT EXISTS stage_runs (
     -- used to do. '' is meaningful: local-disk stages and the ones that fan
     -- out over several services genuinely have no single service to name.
     service     TEXT DEFAULT '',
+    -- Set when the pipeline held this stage because a *service* is down, to
+    -- the canonical service name. Distinct from `service` on purpose: the UI
+    -- has to tell an outage hold from an in-flight download (also blocked, but
+    -- with service='') and from a one-off forgiven blip (service set, no
+    -- held_by, ageing out on its own clock).
+    held_by     TEXT DEFAULT '',
     -- How many times a transient fault has been forgiven, and since when.
     -- The count alone was wrong for an outage: retries are cheap, so a source
     -- that is down for an hour burned through the budget and the book was
@@ -127,6 +133,39 @@ CREATE TABLE IF NOT EXISTS events (
     message TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS service_breaker (
+    service       TEXT PRIMARY KEY,
+    -- closed | open | half_open. Read through `breaker.effective_state`, which
+    -- applies the lazy open -> half_open flip on the clock rather than on a
+    -- timer, so a reader never has to write.
+    state         TEXT NOT NULL DEFAULT 'closed',
+    -- Consecutive service-level failures while closed. Reset by any success,
+    -- and bounded in time by `failures_since`: a failure arriving more than
+    -- `breaker.FAILURE_WINDOW_SECONDS` after the previous one is the first of a
+    -- new streak rather than the next of this one.
+    failures      INTEGER NOT NULL DEFAULT 0,
+    -- When the newest failure of the current streak was counted. It is
+    -- re-stamped on every count, because what `_streak_live` bounds is the gap
+    -- *between* failures, not the age of the streak. Cleared by a trip, a close
+    -- and by an aged-out streak.
+    failures_since TEXT,
+    -- Consecutive trips with no clean recovery. Drives the backoff; reset to 0
+    -- only when a probe closes the breaker.
+    trips         INTEGER NOT NULL DEFAULT 0,
+    opened_at     TEXT,
+    -- When a probe is allowed again. Read as "still open" until this passes.
+    open_until    TEXT,
+    -- Half-open ownership: which single book is allowed through to discover
+    -- whether the service is back. Stale claims are released.
+    probe_book_id INTEGER,
+    probe_stage   TEXT DEFAULT '',
+    probe_at      TEXT,
+    -- The message that tripped it, for the operator's one line.
+    last_failure  TEXT DEFAULT '',
+    last_ok_at    TEXT,
+    changed_at    TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_stage_book ON stage_runs (book_id);
 CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts DESC);
 """
@@ -162,6 +201,7 @@ class Database:
                 "output_path": "TEXT",
                 "failure_kind": "TEXT DEFAULT ''",
                 "service": "TEXT DEFAULT ''",
+                "held_by": "TEXT DEFAULT ''",
                 "transient_count": "INTEGER NOT NULL DEFAULT 0",
                 "transient_since": "TEXT",
             },
@@ -173,6 +213,9 @@ class Database:
             },
             "books": {
                 "genre_source": "TEXT DEFAULT ''",
+            },
+            "service_breaker": {
+                "failures_since": "TEXT",
             },
         }
         for table, columns in wanted.items():
@@ -354,22 +397,134 @@ class Database:
         penalty = -1 if result.status == models.BLOCKED else 0
         self.execute(
             """
-            UPDATE stage_runs SET status=?, detail=?,
+            UPDATE stage_runs SET status=?,
+                   detail=CASE WHEN ? <> '' AND queued_at IS NOT NULL
+                               THEN detail ELSE ? END,
                    artifact=CASE WHEN ?='' THEN artifact ELSE ? END,
                    failure_kind=?,
                    service=?,
+                   held_by=?,
                    attempts=MAX(attempts + ?, 0), finished_at=?
              WHERE book_id=? AND stage=?
             """,
             (
-                result.status, result.detail, result.artifact, result.artifact,
+                # A hold that came back from a stage that *ran* — the half-open
+                # probe, whose poll of an in-flight download failed — leaves the
+                # row's own words alone for exactly the reason `mark_held` does:
+                # the download is still running, and "queued from X" is still
+                # what is happening to it. Every other result writes its detail,
+                # including the `ok` that ends the hold.
+                result.status, result.held_by, result.detail,
+                result.artifact, result.artifact,
                 result.kind if result.status == models.FAILED else "",
-                # Written unconditionally: `ok()` carries no service, so a
-                # successful re-run clears whatever the previous attempt blamed.
+                # Written unconditionally. An `ok` that names the service it
+                # used keeps it; one that does not — a fan-out or local stage,
+                # or any result that failed — clears whatever the previous
+                # attempt blamed.
                 result.service,
+                # Likewise unconditional, and for the same reason: only a
+                # breaker hold sets it, so any other result means this stage is
+                # no longer being held and must stop reading as if it were.
+                result.held_by,
                 penalty, _now(), book_id, stage,
             ),
         )
+
+    def mark_held(self, book_id: int, stage: str, service: str, detail: str) -> None:
+        """Write the breaker's hold onto a stage row, once per hold.
+
+        An UPDATE rather than a `mark_done` call because the pipeline never ran
+        the stage — the breaker refused it before it started — so there is no
+        result to record, only a reason to wait.
+
+        Three things are deliberate:
+
+        * the write is guarded on "not already held by this service", so a
+          week-long outage costs one UPDATE per book rather than one per book
+          per 15-second sweep. The guard is `status <> blocked OR held_by <>
+          service` and both halves are load-bearing: `status <> blocked` alone
+          skipped every row the caller actually calls this for — a book
+          forgiven on the per-book clock is `blocked` with `held_by=''`, which
+          is exactly the shape `pipeline._advance` asks to have marked, so the
+          UPDATE matched zero rows and those books stayed in no group at all
+          while the panel's count said they did not exist. Comparing `held_by`
+          against the *inbound service* rather than against `''` is what keeps
+          a hold from one service from blocking the write for another.
+        * `attempts` is zeroed because the breaker is the clock now. The stage's
+          own budget is what parks a genuinely broken book, and it must not be
+          spent on an outage. That cannot loop forever: once the service is
+          healthy a failure is no longer transient and parks normally;
+        * `queued_at`, `output_path` and `artifact` are left alone — and so is
+          the `detail` of a row that has a `queued_at`, which is the one field
+          this write does not overwrite. An in-flight download keeps its
+          `queued_at` and its artifact, which is what the progress view and
+          `_watch` read to pick the task back up, and it keeps its own words:
+          "queued from MyAnonaMouse (a good release)", the release it is
+          fetching. Nothing about that sentence stops being true while the
+          breaker is open — the download runs on without us, and what the hold
+          costs it is our *poll* — so replacing it with "Shelfmark cannot reach
+          its sources" sent the operator looking for a problem on a book that
+          was downloading fine and threw away the one line naming what it had
+          picked. Every other row gets the hold's detail: for a book that is
+          not downloading, "waiting on a downed service" is exactly why nothing
+          is happening to it. The hold itself is still written for a queued row
+          (`held_by`, `attempts`, the cleared clock) because `book_state` reads
+          `held_by` to tell a book waiting on a source from one whose audiobook
+          "does not exist anywhere" — dropping the row instead would restore
+          that false reading.
+        """
+        self.execute(
+            """
+            UPDATE stage_runs SET status=?, held_by=?, failure_kind='', service=?,
+                   detail=CASE WHEN queued_at IS NULL THEN ? ELSE detail END,
+                   attempts=0, transient_count=0, transient_since=NULL,
+                   finished_at=?
+             WHERE book_id=? AND stage=? AND (status <> ? OR held_by <> ?)
+            """,
+            (models.BLOCKED, service, service, detail, _now(), book_id, stage,
+             models.BLOCKED, service),
+        )
+
+    def hold_rows(self, ids: "list[int]", service: str, detail: str) -> int:
+        """Convert already-failed stage rows into breaker holds. Returns how many.
+
+        One statement per 500 rows rather than one per row: an outage parks
+        hundreds of books at once and the trip has to be cheap, and SQLite's
+        bound-parameter limit is 999 so the chunking is not optional.
+
+        This is the *reclaim* path — `breaker._trip` handing the failures it
+        explains to the breaker — and it is deliberately not identical to
+        `mark_held`, which writes the same hold on a live refusal: reclaim
+        reaches rows that already failed, and a row can fail while a download
+        is in flight. The `queued_at` guard on `detail` is the one that was
+        missing here and present there, and it is the same invariant
+        `mark_held` states at length: "queued from MyAnonaMouse (a good
+        release)" is the only line saying what the book is fetching, and
+        replacing it with the outage sentence loses the release name for good
+        — the row is written `blocked` with `attempts=0` and nothing ever
+        writes that sentence again. Message loss only, which is why it is
+        small, but it is loss all the same.
+        """
+        if not ids:
+            return 0
+        stamp = _now()
+        changed = 0
+        for start in range(0, len(ids), 500):
+            chunk = list(ids[start:start + 500])
+            marks = ",".join("?" * len(chunk))
+            cur = self.execute(
+                f"""
+                UPDATE stage_runs SET status=?, held_by=?, failure_kind='',
+                       service=?,
+                       detail=CASE WHEN queued_at IS NULL THEN ? ELSE detail END,
+                       attempts=0, transient_count=0,
+                       transient_since=NULL, finished_at=?
+                 WHERE id IN ({marks})
+                """,
+                [models.BLOCKED, service, service, detail, stamp, *chunk],
+            )
+            changed += cur.rowcount or 0
+        return changed
 
     def mark_queued(self, book_id: int, stage: str, detail: str = "queued") -> None:
         self.execute(
@@ -435,19 +590,109 @@ class Database:
         return (row["output_path"] or "") if row else ""
 
     def reset_stage(self, book_id: int, stage: str) -> None:
-        """Clear a stage (and everything downstream) so it runs again."""
+        """Clear a stage (and everything downstream) so it runs again.
+
+        The per-book forgiveness clock is cleared with it, and that is not
+        bookkeeping: the clock ages on the wall, so a book whose `transient_since`
+        was set 25 hours ago — by an outage that is over — would be "25 hours
+        into" a clock the retry did not spend, and the first retried failure
+        would be escalated to a real `failed` on its very first attempt. The
+        operator clicks Retry, the book parks instantly, and every retry after
+        that repeats it. `bump_transient` reuses an existing `transient_since`,
+        so nothing else would have cleared it either. This is the same false
+        park `breaker._close` clears the clock to prevent, reached by hand.
+        """
         idx = models.STAGES.index(stage)
         for downstream in models.STAGES[idx:]:
             self.execute(
                 """
                 UPDATE stage_runs SET status=?, attempts=0, detail='', artifact='',
-                       failure_kind='', service='',
+                       failure_kind='', service='', held_by='',
+                       transient_count=0, transient_since=NULL,
                        queued_at=NULL, output_path=NULL,
                        started_at=NULL, finished_at=NULL
                  WHERE book_id=? AND stage=?
                 """,
                 (models.PENDING, book_id, downstream),
             )
+
+    # -- the breaker's view of the stage rows ----------------------------
+    def failed_transient_rows(self, since: str, kinds: tuple[str, ...]) -> list[dict]:
+        """`failed` rows recent enough to still be the *same* outage.
+
+        The vocabulary is passed in rather than hard-coded so `db` stays
+        import-free of `breaker` (which imports `db`): the caller owns the
+        definition of "transient".
+        """
+        if not kinds:
+            return []
+        marks = ",".join("?" * len(kinds))
+        return [
+            dict(r)
+            for r in self.query(
+                f"""
+                SELECT id, book_id, stage, status, failure_kind, service, detail,
+                       finished_at, attempts
+                  FROM stage_runs
+                 WHERE status = ? AND failure_kind IN ({marks})
+                   AND finished_at IS NOT NULL AND finished_at >= ?
+                 ORDER BY finished_at ASC
+                """,
+                [models.FAILED, *kinds, since],
+            )
+        ]
+
+    def clear_transient_for_service(self, service: str, opened_at: str = "") -> int:
+        """Reset the per-book transient clock for everything a service held.
+
+        Needed because that clock ages on the wall, not on attempts: a book
+        whose `transient_since` was set during an outage would be at 25h the
+        first time it failed after recovery, and would park on the spot —
+        having "failed for 25 hours" without having been tried for 24 of them.
+        Without this pass the breaker would manufacture exactly the false parks
+        it exists to remove.
+
+        The predicate is "the row is `blocked` and names this service". Both
+        halves are load-bearing:
+
+        * `held_by = ?` is the books the breaker actually held;
+        * `status='blocked' AND service=?` catches the rows written *before* the
+          trip. Those reached the acquire grace branch in the same sweep, so
+          they are `blocked`, with `failure_kind=''` and no `held_by`, but they
+          carry a live clock that started when the outage did. Note the bound
+          here is the *service*, not `transient_since >= opened_at`: the rows
+          this exists for are written before the trip by definition, so their
+          clock necessarily starts a few seconds *earlier* than `opened_at` and
+          that comparison would miss every one of them. A blocked stage row
+          naming a service is by construction a forgiven failure *of that
+          service*, which is precisely the set the recovered service owns.
+        """
+        from .health import canonical  # deferred: health -> clients -> db
+
+        if not service:
+            return 0
+        candidates = self.query(
+            "SELECT id, status, service, held_by FROM stage_runs "
+            "WHERE held_by <> '' OR status = ?",
+            (models.BLOCKED,),
+        )
+        ids = [
+            r["id"]
+            for r in candidates
+            if canonical(r["held_by"] or "") == service
+            or canonical(r["service"] or "") == service
+        ]
+        changed = 0
+        for start in range(0, len(ids), 500):
+            chunk = list(ids[start:start + 500])
+            marks = ",".join("?" * len(chunk))
+            cur = self.execute(
+                f"UPDATE stage_runs SET transient_count=0, transient_since=NULL "
+                f"WHERE id IN ({marks})",
+                chunk,
+            )
+            changed += cur.rowcount or 0
+        return changed
 
     # -- credentials -----------------------------------------------------
     def set_credential(self, key: str, encrypted: bytes) -> None:
