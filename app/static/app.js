@@ -25,6 +25,18 @@ let currentFilter = 'attention';
 let searchTerm = '';
 let serviceDetail = null;      // the last /api/services/<name> payload
 let versionHistory = null;     // the last /api/version/history payload
+/* How many service re-checks are in flight. Module state and not a DOM node,
+ * because refresh() replaces #rail and #view from scratch every 6 seconds:
+ * a class put on a row, or a disabled attribute put on a button, is gone by
+ * the next poll — and on a real deployment the poll lands several times inside
+ * one check (six sequential authenticated probes, each with its own 30-second
+ * timeout; see check_all() in app/health.py). The detached button also cannot
+ * be re-enabled, so the rail's Re-check used to look live again while the
+ * request it had started was still running.
+ * A count rather than a boolean: the rail's "Re-check" and the services page's
+ * "Re-check all" are two buttons for the same endpoint and both are on screen
+ * at once on #/services, so the last one to finish is the one that lowers it. */
+let healthChecks = 0;
 
 const BASE = '';
 
@@ -226,6 +238,7 @@ function renderMasthead() {
   const nav = [
     ['/', 'Home', 'dashboard'],
     ['/books', 'My Books', 'books'],
+    ['/genres', 'Genres', 'genres'],
     ['/services', 'Services', 'services'],
     ['/activity', 'Activity', 'activity'],
   ];
@@ -319,18 +332,35 @@ function renderRail() {
   const { name, param } = route();
   const current = name === 'service' ? canonicalService(param) : '';
 
+  // While a re-check is in flight every service row says "testing…" instead of
+  // the count it was showing, because the count being shown is the answer the
+  // operator just clicked to get rid of — and a row of stale numbers with no
+  // marker is what made a slow check read as a button that did nothing. The
+  // Goodreads row below is deliberately left alone: check_all() probes the six
+  // SERVICES and nothing else, so a "testing…" there would be a claim about a
+  // probe that is not running.
+  const checking = healthChecks > 0;
+  // `.bad` is dropped while testing so no pink alert surface is left
+  // underneath a row that is saying "I do not know yet"; `.current` stays,
+  // because which service you are looking at is still true.
   const rows = health.services.map(s => {
-    const cls = s.ok === true ? 'ok' : s.ok === false ? (s.failure_kind === 'auth' ? 'err' : 'warn') : 'idle';
-    const note = s.ok === false
-      ? escapeHtml(KIND_LABEL[s.failure_kind] || 'down')
+    const cls = checking ? 'testing'
+      : s.ok === true ? 'ok'
+      : s.ok === false ? (s.failure_kind === 'auth' ? 'err' : 'warn') : 'idle';
+    const note = checking ? 'testing…'
+      : s.ok === false ? escapeHtml(KIND_LABEL[s.failure_kind] || 'down')
       : escapeHtml(s.detail || 'never checked');
     // The check time lives in the tooltip rather than its own column: a
     // narrow rail spent more width on "just now" repeated seven times than on
-    // the detail it was squeezing to "10 li…".
+    // the detail it was squeezing to "10 li…". While testing it keeps saying
+    // when the last check was, which is still true.
     const when = s.checked ? `checked ${relTime(s.checked_at)}` : 'never checked';
-    return `<a class="svc-row ${s.ok === false ? 'bad' : ''}"
+    // The open service is marked with a class, not the inline background it
+    // used to carry: a style attribute outranks .svc-row:hover, so the current
+    // row was the one row in the list that gave no hover feedback.
+    return `<a class="svc-row ${checking ? 'testing' : s.ok === false ? 'bad' : ''} ${s.service === current ? 'current' : ''}"
                href="#/service/${s.service}" title="${escapeHtml(s.label)} — ${escapeHtml(when)}"
-               style="${s.service === current ? 'background:var(--cream-2)' : ''}">
+               ${s.service === current ? 'aria-current="true"' : ''}>
       <span class="dot ${cls}"></span>
       <span class="name">${escapeHtml(s.label)}</span>
       <span class="note">${note}</span>
@@ -348,27 +378,30 @@ function renderRail() {
   host.innerHTML = `
     <div class="rail-card">
       <h3><span class="grow">Service status</span>
-        <button class="tiny ghost" onclick="recheckServices(this)">Re-check</button></h3>
+        <button class="tiny ghost" onclick="recheckServices(this)"
+                ${checking ? 'disabled' : ''}>${checking ? 'testing…' : 'Re-check'}</button></h3>
       <div class="body flush">
-        <div class="svc-list">${rows}${grSocket}</div>
+        <div class="svc-list"${checking ? ' aria-busy="true"' : ''}>${rows}${grSocket}</div>
       </div>
     </div>
 
     <div class="rail-card">
       <h3>Run control</h3>
       <div class="body">
-        <div class="row" style="margin-bottom:9px">
+        <div class="rail-actions">
           <button class="tiny" onclick="sweepNow(this)">Sweep now</button>
           <button class="tiny" onclick="reconcileNow(this)">Check shelf</button>
         </div>
-        <label class="row tight small" style="cursor:pointer">
+        <label class="rail-check">
           <input type="checkbox" ${state?.auto_shelve ? 'checked' : ''}
-                 onchange="setAutoShelve(this.checked)" style="width:auto">
-          Move finished books to a collected shelf
+                 onchange="setAutoShelve(this.checked)">
+          <span>Move finished books to a collected shelf</span>
         </label>
-        ${state?.disk_free_gb != null ? `<div class="small faint" style="margin-top:9px">
-          ${state.disk_free_gb} GB free where books land</div>` : ''}
-        <a class="sidebar-version" href="#/version" style="margin-top:9px">
+        ${state?.disk_free_gb != null ? `<p class="rail-note">
+          <b>${state.disk_free_gb} GB</b> free where books land</p>` : ''}
+      </div>
+      <div class="rail-foot">
+        <a class="sidebar-version" href="#/version">
           <span class="vnum">v${escapeHtml(versionHistory?.current || '1.0.0')}</span>
           What's new<span class="new-dot"></span>
         </a>
@@ -480,7 +513,13 @@ function renderIssuePreview() {
       </div>
       <div class="stage-detail">${escapeHtml(g.detail.slice(0, 190))}
         <span class="why">${escapeHtml(g.fix)}</span></div>
-      <div>${g.service
+      <div>${g.stage === 'held'
+        /* The only row that offers a way out of the hold rather than a way to
+         * look at it. Every other exit is the service answering, and the whole
+         * point of a stuck breaker is that nothing can prove it did. */
+        ? `<button class="tiny" onclick="clearBreaker('${escapeHtml(canonicalService(g.service))}', this)">Clear hold</button>
+           <a class="btn tiny" href="#/service/${encodeURIComponent(canonicalService(g.service))}">Open</a>`
+        : g.service
         ? `<a class="btn tiny" href="#/service/${encodeURIComponent(canonicalService(g.service))}">Open</a>`
         : `<button class="tiny" onclick="retryGroup('${escapeHtml(g.stage)}')">Retry all</button>`}</div>
     </div>`).join('');
@@ -642,6 +681,456 @@ function bookRow(book) {
 
 function setFilter(f) { currentFilter = f; render(); }
 
+/* ---------------------------------------------------------------- genres */
+/* The DIRECTORY MAP: which folder on disk each category files into, which Open
+ * Notebook notebook it routes to, and the books that actually landed there.
+ *
+ * The axis is the system CATEGORY — the closed set in categories.yml — not the
+ * free-text genres scraped from Goodreads. A genre string does not put a book
+ * anywhere: it is only the *input* to the classify rule (case-insensitive
+ * substring, longest needle first, one category per book; app/stages/classify.py
+ * resolve_category), and the category is what names the directory:
+ *
+ *   category -> folder   a directory under books_root. Kavita, BookLore and
+ *                        Grimmory each scan it as one of their own libraries,
+ *                        so one folder is three libraries, not one.
+ *            -> notebook the Open Notebook notebook the book is filed into.
+ *
+ * Four facts the flat mapping hides, all real, all shown rather than smoothed
+ * over:
+ *
+ *   - category -> folder is NOT injective. Fantasy and Fiction are distinct
+ *     categories that share the folder /books/Fiction, so a folder-level view
+ *     and a category-level view are genuinely different groupings. The page
+ *     names the other categories in a folder instead of implying a one-to-one
+ *     map.
+ *
+ *   - a category may map to NO notebook (`notebook: ""`; Manga and Natgeo do).
+ *     Deliberate, and not a fault: the notebook stage returns `skipped` for
+ *     these, verify never asks Open Notebook for one of their books, and
+ *     placement and indexing are untouched. Said in words, never rendered as a
+ *     blank cell or as an error.
+ *
+ *   - a book may carry a category that is not in categories.yml at all — set by
+ *     hand, or left behind by a rename. destination_for() still files those,
+ *     falling back to the category name itself as the folder, so they do have a
+ *     destination; it is simply not one anyone configured, and they get no
+ *     notebook. They get their own pill rather than vanishing off the page.
+ *
+ *   - a configured category holding no books is still a real destination. Every
+ *     configured category is listed, at 0 where it is empty, because an empty
+ *     destination is one of the things the operator is here to check.
+ *
+ * The counts PARTITION: one category per book, so the category pills sum to the
+ * library. The old genre strip overlapped by design, because a book carries
+ * several genres; this axis does not, and the toolbar note says so.
+ */
+
+const NO_CATEGORY = '__unconfigured__';   // books whose category is not in categories.yml
+const REVIEW = '__review__';              // the fallback bucket — books classify flagged
+const PRIMARY_GENRE_SOURCE = 'goodreads'; // anything else is a fallback
+
+/* The selected pill: '' = All, else a category key or one of the two sentinels. */
+let currentCategory = '';
+
+/* /api/categories -> {categories: {Name: {folder, notebook}}, fallback}.
+ *
+ * The folder and notebook are served ONLY here, so this page fetches it — see
+ * the `wantsSettings` gate in refresh(), which must include this route or the
+ * two columns render blank. Null means the fetch has not landed (or failed):
+ * the page then still renders every category from /api/state and says the
+ * destination detail is missing, rather than dropping columns or breaking. */
+let categoryMap = null;
+let categoryMapError = '';
+
+function isConfiguredCategory(name) {
+  return !!name && (state?.categories || []).includes(name);
+}
+
+/* The folder a category is filed under, or null when there is nothing honest to
+ * show.
+ *
+ * With the map in hand this mirrors classify.destination_for exactly: a category
+ * with no entry in categories.yml falls back to the category name itself as its
+ * folder, so the path shown is the path the pipeline would use. Without it, that
+ * same fallback would invent "/books/Fantasy" for a category that actually files
+ * into /books/Fiction — a wrong path is worse than a blank one, so the map's
+ * absence is returned as null and each caller says so in its own words. */
+function categoryFolder(name) {
+  if (!categoryMap) return null;
+  return (categoryMap.categories?.[name]?.folder) || name;
+}
+
+/* The notebook for a category. `''` is a real configured answer ("no notebook
+ * yet"), so it is distinct from "we do not know" — which is what null is, when
+ * the map never arrived or the category is not configured at all. */
+function categoryNotebook(name) {
+  if (!categoryMap) return null;
+  const entry = (categoryMap.categories || {})[name];
+  if (!entry) return null;
+  return entry.notebook || '';
+}
+
+/* A category with `notebook: ""` is a real state, not a gap, and the sentence is
+   the whole point of the column: the notebook stage skips these books, which
+   costs them nothing, because placement and the three indexers never consult
+   the notebook. */
+const NO_NOTEBOOK = 'no notebook — the notebook stage skips these books';
+
+/* The books under one pill. `key` may be a category, a sentinel, or '' (All). */
+function booksOfCategory(key) {
+  const books = state?.books || [];
+  if (key === NO_CATEGORY) return books.filter(b => !isConfiguredCategory(b.category));
+  if (key === REVIEW) return books.filter(b => b.needs_review);
+  if (!key) return books;
+  return books.filter(b => (b.category || '') === key);
+}
+
+/* Every pill's count in one pass, off the same book list the pills filter —
+   nothing is counted from a second source, so the two cannot disagree. */
+function categoryCounts() {
+  const counts = new Map();
+  let review = 0;
+  let off = 0;
+  (state?.books || []).forEach(book => {
+    const key = book.category || '';
+    if (isConfiguredCategory(key)) counts.set(key, (counts.get(key) || 0) + 1);
+    else off += 1;
+    if (book.needs_review) review += 1;
+  });
+  return { counts, review, off };
+}
+
+/* The scraped genre strings the books in view arrived with, most common first.
+ *
+ * Provenance, not an axis. These are the strings the categories.yml rules were
+ * matched against, so they are what explains why a given book sits where it
+ * does — shown beside the destination they produced, never as a filter bar. A
+ * book carries several, so unlike the pills these counts overlap. */
+function genreBreakdown(books) {
+  const counts = new Map();
+  books.forEach(book => (book.genres || []).filter(Boolean)
+    .forEach(g => counts.set(g, (counts.get(g) || 0) + 1)));
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/* Where the genres for these books came from.
+ *
+ * Only the books that HAVE a genre are tallied: a book with none has no source
+ * to name, and counting it here as "unresolved" would have reported the
+ * no-genre bucket as a pile of fallbacks. The source is named rather than
+ * labelled "authoritative"/"fallback" — "openlibrary" is the fact, and a label
+ * would be a guess about why — but the fallbacks take the alert surface so they
+ * read as a different thing at a glance, and the note says what that means.
+ *
+ * Returns nothing at all when not one book in view has a genre: there is no
+ * source to report, and the page says so in its own line. */
+function genreSources(books) {
+  const withGenres = books.filter(b => (b.genres || []).filter(Boolean).length);
+  if (!withGenres.length) return '';
+
+  const counts = new Map();
+  withGenres.forEach(b => {
+    const src = b.genre_source || 'unresolved';
+    counts.set(src, (counts.get(src) || 0) + 1);
+  });
+  const parts = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([src, n]) => `<span class="chip ${src === PRIMARY_GENRE_SOURCE ? '' : 'blocked'}">
+      ${escapeHtml(src)} <span class="faint">${n}</span></span>`).join('');
+
+  const notes = [];
+  if (withGenres.length !== books.length) {
+    notes.push(`${books.length - withGenres.length} of these have no genre from any source.`);
+  }
+  if (Array.from(counts.keys()).some(s => s !== PRIMARY_GENRE_SOURCE)) {
+    notes.push('A genre from any source but goodreads is a fallback — that book’s own page carried none.');
+  }
+  return gline('Genres from', `${parts}
+    ${notes.length ? `<span class="src-note">${notes.join(' ')}</span>` : ''}`);
+}
+
+/* One label/value line of the meta band, on the .kv grid's inset. */
+function gline(label, body) {
+  return `<div class="gline"><span class="lbl">${escapeHtml(label)}</span>${body}</div>`;
+}
+
+/* A sentence of explanation, spanning the band.
+ *
+ * Deliberately not a .gline: a label column only works when the value is short
+ * enough to sit beside it, and these notes are prose. A label with a paragraph
+ * under it leaves the label stranded on a line of its own, which reads as a
+ * broken row. --muted, not italic: .src-note's italic is for a short aside
+ * against a value ("no notebook"), and a paragraph of it is hard work. */
+function bandNote(html) { return `<div class="band-note">${html}</div>`; }
+
+function chipCount(text, n) {
+  return `<span class="chip">${escapeHtml(text)} <span class="faint">${n}</span></span>`;
+}
+
+/* The scraped genres that put books here, capped so a big category does not
+   turn the band into a wall. The cap is stated rather than silent, and the
+   remainder is a number the operator can go and find on the books' own pages. */
+function genresSeenLine(books) {
+  const rows = genreBreakdown(books);
+  if (!rows.length) return '';
+  const CAP = 8;
+  const shown = rows.slice(0, CAP);
+  const rest = rows.length - shown.length;
+  return gline('Genres seen', shown.map(([g, n]) => chipCount(g, n)).join('') +
+    (rest ? `<span class="src-note">and ${rest} more, each counted once per book.</span>` : ''));
+}
+
+/* The destination half of the page: what the pipeline does with this category.
+ * Rendered as the same label/value lines the book page's .kv uses, because it
+ * is the same kind of fact — a name and its value. */
+function destinationLines(name, books) {
+  // The map never arrived. Say that and keep the books: the categories come
+  // from /api/state and are still correct, only the two columns are missing.
+  if (!categoryMap) {
+    return gline('Destination', `<span class="src-note">folder and notebook
+      unavailable — /api/categories did not load${categoryMapError
+        ? ` (${escapeHtml(categoryMapError)})` : ''}. The categories themselves
+      come from /api/state and are unaffected.</span>`);
+  }
+
+  const root = state?.paths?.books_root || '';
+  const folder = categoryFolder(name);
+  const notebook = categoryNotebook(name);
+  const flagged = books.filter(b => b.needs_review).length;
+
+  // Two categories can share one folder — Fantasy and Fiction both write to
+  // /books/Fiction. Named, because it is the reason a folder count and a
+  // category count are different numbers.
+  const shared = Object.entries(categoryMap.categories || {})
+    .filter(([other, entry]) => other !== name && (entry.folder || other) === folder)
+    .map(([other]) => other);
+
+  const out = [
+    gline('Folder', `<span class="mono">${escapeHtml(root)}/${escapeHtml(folder)}</span>`),
+    // notebook === null cannot happen for a configured category — both
+    // endpoints read the same categories.yml — but a null reaching the template
+    // would render as the literal text "null", so it is spelled out anyway.
+    gline('Notebook', notebook === null
+      ? '<span class="src-note">not a category in categories.yml</span>'
+      : (notebook
+          ? escapeHtml(notebook)
+          : `<span class="src-note">${NO_NOTEBOOK}</span>`)),
+    gline('Books', `${books.length} filed${flagged
+      ? ` · <span class="flag-note">${flagged} flagged for review</span>` : ''}`),
+  ];
+  if (shared.length) {
+    out.push(bandNote(`${shared.map(escapeHtml).join(', ')}
+      ${shared.length === 1 ? 'also files' : 'also file'} into this folder, so
+      ${escapeHtml(root)}/${escapeHtml(folder)} holds more books than this
+      category does. A Kavita, BookLore or Grimmory library pointed at that
+      folder sees all of them — which is why a folder count and a category count
+      are different numbers.`));
+  }
+  if (categoryMap.fallback === name) {
+    out.push(bandNote(`This is the fallback category: a book whose genres match no
+      rule is filed here and flagged for review, so the flag — not the folder — is
+      what separates it from a book that matched a rule.`));
+  }
+  out.push(genresSeenLine(books));
+  out.push(genreSources(books));
+  return out.filter(Boolean).join('');
+}
+
+/* The books whose category is not in categories.yml.
+ *
+ * destination_for() falls back to the category name as the folder, so these do
+ * have a path on disk — it is just one no one configured, with no notebook and
+ * no rule that can reach it. Grouped by value, because each distinct value is
+ * its own folder. */
+function unconfiguredLines(books) {
+  const root = state?.paths?.books_root || '';
+  const counts = new Map();
+  books.forEach(b => {
+    const key = b.category || '';
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  const rows = Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([key, n]) => gline(key || 'no category',
+      `<span class="mono">${escapeHtml(root)}/${escapeHtml(key || '')}</span>
+       <span class="src-note">no notebook — not in categories.yml</span>
+       <span class="faint">${n}</span>`))
+    .join('');
+  return `${rows}
+    ${bandNote(`categories.yml has no entry for these values, so the folder is the
+      category name itself and there is no notebook. Adding the value under
+      <span class="mono">categories:</span> gives it a folder and a notebook of
+      your choosing; a library in Kavita, BookLore or Grimmory must contain that
+      folder before anything is indexed into it.`)}
+    ${genresSeenLine(books)}`;
+}
+
+/* The books the classify run could not place by rule. Their category IS
+ * configured — the fallback — so they are somewhere real; the flag is the only
+ * thing marking them, which is exactly why the page keeps them reachable. */
+function reviewLines(books) {
+  const fallback = categoryMap?.fallback || '';
+  return `${bandNote(`No genre matched a rule, so classify filed each of these on
+    the fallback${fallback ? ` category (<b>${escapeHtml(fallback)}</b>)` : ''} and
+    flagged it. They are placed and indexed like any other book — the flag is a
+    note to you, not a fault. Clear it by setting the category by hand on the
+    book, or by adding a rule to categories.yml.`)}
+    ${genresSeenLine(books)}
+    ${genreSources(books)}`;
+}
+
+/* The pill strip. `.filters` is goodreads' own tab component, reused verbatim —
+   the page does not own a second filter widget. The key travels in a data
+   attribute: a category name is operator-written text and escapeHtml's &#39;
+   decodes back to a quote before the inline JS is parsed. */
+function categoryTab(key, label, count, active) {
+  return `<button class="${active === key ? 'on' : ''}" data-cat="${escapeHtml(key)}"
+      ${active === key ? 'aria-current="true"' : ''}
+      onclick="setCategoryTab(this.dataset.cat)">
+      ${escapeHtml(label)} <span class="faint">${count}</span>
+    </button>`;
+}
+
+function setCategoryTab(key) { currentCategory = key; render(); }
+
+/* Every configured category as a row of the map: the folder it writes to, the
+ * notebook it routes to, and how many books sit there. Empty categories stay in
+ * the table at 0 — they are destinations, and "is anything in Islamic yet" is a
+ * question the table should answer without a click. */
+function overviewPanel(counts) {
+  const configured = state?.categories || [];
+  const root = state?.paths?.books_root || '';
+  const fallback = categoryMap?.fallback || '';
+
+  const rows = configured.map(name => {
+    const notebook = categoryNotebook(name);
+    const folder = categoryFolder(name);   // null when /api/categories did not load
+    // `data-k` is the cell's own column name. Below 780px the grid collapses to
+    // one column and the head row is dropped, so each cell has to carry its own
+    // label or "Fictional" alone would not say which column it came from.
+    return `<div class="cat-row">
+      <span data-k="Category"><button class="shelfLink" data-cat="${escapeHtml(name)}"
+        onclick="setCategoryTab(this.dataset.cat)">${escapeHtml(name)}</button>${
+        name === fallback ? '<span class="cat-tag">fallback</span>' : ''}</span>
+      <span class="mono" data-k="Folder">${folder === null
+        ? '<span class="src-note">unknown</span>'
+        : escapeHtml(root) + '/' + escapeHtml(folder)}</span>
+      <span data-k="Notebook">${notebook
+        ? escapeHtml(notebook)
+        : `<span class="src-note">${categoryMap ? NO_NOTEBOOK
+            : 'not loaded'}</span>`}</span>
+      <span class="faint" data-k="Books">${counts.get(name) || 0}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="panel">
+    <h2><span class="grow">Where each category files</span>
+      <span class="faint small">${configured.length} in categories.yml</span></h2>
+    <div class="body flush">
+      ${categoryMap ? '' : `<div class="band-note cat-note">The folder and notebook
+        columns are unknown: /api/categories did not load${
+          categoryMapError ? ` (${escapeHtml(categoryMapError)})` : ''}. The
+        categories themselves come from /api/state and are correct.</div>`}
+      <div class="cat-table">
+        <div class="cat-row head">
+          <span>Category</span><span>Folder on disk</span><span>Notebook</span><span>Books</span>
+        </div>
+        ${rows}
+      </div>
+    </div>
+  </div>`;
+}
+
+function emptyFor(selected) {
+  if (selected === REVIEW) {
+    return 'Nothing is flagged for review — every book matched a genre rule.';
+  }
+  if (selected === NO_CATEGORY) {
+    return 'Every book carries a category from categories.yml.';
+  }
+  if (selected) {
+    return `No book is filed under “${escapeHtml(selected)}” yet. It is a
+      configured destination and simply empty — the folder is created when the
+      first book lands in it.`;
+  }
+  return 'No book has been discovered yet.';
+}
+
+function viewGenres() {
+  const books = state?.books || [];
+  const configured = state?.categories || [];
+  const { counts, review, off } = categoryCounts();
+  const total = books.length;
+  const root = state?.paths?.books_root || '';
+
+  // No categories at all is a fact about categories.yml, not a broken page:
+  // with an empty categories table there is no folder to file anything into and
+  // no area of the site that can classify. Said plainly, with what to do.
+  if (!configured.length) {
+    return `<div class="panel">
+      <h2><span class="grow">Where books are filed</span></h2>
+      <div class="body"><div class="empty">
+        categories.yml defines no categories, so there is no folder for the
+        pipeline to file a book into and no notebook to route it to. Add one and
+        the next classify run will use it.
+      </div></div>
+    </div>`;
+  }
+
+  // A selection that no longer exists — the taxonomy changed under a click, or
+  // a stale module variable — drops back to All rather than rendering an empty
+  // page under a dead pill.
+  const known = !currentCategory
+    || currentCategory === REVIEW
+    || currentCategory === NO_CATEGORY
+    || configured.includes(currentCategory);
+  const selected = known ? currentCategory : '';
+
+  const shown = booksOfCategory(selected);
+  const heading = selected === REVIEW ? 'Flagged for review'
+    : selected === NO_CATEGORY ? 'Not in categories.yml'
+      : selected || 'All books';
+
+  const meta = selected === REVIEW ? reviewLines(shown)
+    : selected === NO_CATEGORY ? unconfiguredLines(shown)
+      : selected ? destinationLines(selected, shown)
+        : `${bandNote(`Every category in categories.yml, the folder it files into
+            under <span class="mono">${escapeHtml(root)}</span>, and the Open
+            Notebook notebook it routes to. Kavita, BookLore and Grimmory each
+            scan the same folders, so one folder is three libraries. A book's
+            scraped genres only decide which category it gets — open a book to
+            see the genres it arrived with.`)}
+          ${genresSeenLine(shown)}
+          ${genreSources(shown)}`;
+
+  return `
+    <div class="toolbar">
+      <div class="filters">
+        ${categoryTab('', 'All', total, selected)}
+        ${configured.map(name => categoryTab(name, name, counts.get(name) || 0, selected)).join('')}
+        ${review ? categoryTab(REVIEW, 'Needs review', review, selected) : ''}
+        ${off ? categoryTab(NO_CATEGORY, 'Unconfigured', off, selected) : ''}
+      </div>
+      <span class="grow"></span>
+      <span class="faint small toolbar-note">one category per book, so the category
+        pills add up to ${total}. “Needs review” is a flag on top of a category, not
+        a category of its own.</span>
+    </div>
+
+    ${selected ? '' : overviewPanel(counts)}
+
+    <div class="panel">
+      <h2><span class="grow">${escapeHtml(heading)}</span>
+        <span class="faint small">${shown.length} book${shown.length === 1 ? '' : 's'}</span></h2>
+      <div class="body tight panel-meta">${meta}</div>
+      ${shown.length
+        ? `<div class="book-list">${shown.map(bookRow).join('')}</div>`
+        : `<div class="empty">${emptyFor(selected)}</div>`}
+    </div>`;
+}
+
 /* The header search is global: typing in it jumps to the book list and filters
    there, so it works from any view. */
 function onHeaderSearch(value) {
@@ -764,20 +1253,26 @@ function statusChip(s) {
 
 function viewServices() {
   const health = state?.health || { services: [] };
+  // The same in-flight state the rail renders, from the same counter — the two
+  // are on screen together on this route, so a card and a rail row disagreeing
+  // about whether a check is running would be the bug, not the fix.
+  const checking = healthChecks > 0;
   const cards = health.services.map(s => {
-    const cls = s.ok === true ? 'ok' : s.ok === false ? (s.failure_kind === 'auth' ? 'err' : 'warn') : 'idle';
-    return `<div class="svc ${s.ok === false ? 'down' : ''}" onclick="go('/service/${s.service}')">
+    const cls = checking ? 'testing'
+      : s.ok === true ? 'ok'
+      : s.ok === false ? (s.failure_kind === 'auth' ? 'err' : 'warn') : 'idle';
+    return `<div class="svc ${checking ? 'testing' : s.ok === false ? 'down' : ''}" onclick="go('/service/${s.service}')">
       <div class="svc-head">
         <span class="dot ${cls}"></span>
         <span class="name">${escapeHtml(s.label)}</span>
         <span class="grow"></span>
-        ${statusChip(s)}
+        ${checking ? '<span class="chip testing">testing…</span>' : statusChip(s)}
       </div>
-      <div class="meta">${escapeHtml(s.detail || 'never checked')}</div>
-      ${s.ok === false ? `<div class="impact">${escapeHtml(s.impact)}</div>` : ''}
+      <div class="meta">${checking ? 'testing…' : escapeHtml(s.detail || 'never checked')}</div>
+      ${!checking && s.ok === false ? `<div class="impact">${escapeHtml(s.impact)}</div>` : ''}
       <div class="faint small" style="margin-top:6px">
         ${s.checked ? `checked ${escapeHtml(relTime(s.checked_at))}` : 'never checked'}
-        ${s.ok_since ? ` · healthy since ${escapeHtml(relTime(s.ok_since))}` : ''}
+        ${!checking && s.ok_since ? ` · healthy since ${escapeHtml(relTime(s.ok_since))}` : ''}
       </div>
     </div>`;
   }).join('');
@@ -799,10 +1294,11 @@ function viewServices() {
   return `
     <div class="panel">
       <h2><span class="grow">Services</span>
-        <button class="tiny" onclick="recheckServices(this)">Re-check all</button>
+        <button class="tiny" onclick="recheckServices(this)"
+                ${checking ? 'disabled' : ''}>${checking ? 'testing…' : 'Re-check all'}</button>
       </h2>
       <div class="body">
-        <div class="svc-grid">${cards}</div>
+        <div class="svc-grid"${checking ? ' aria-busy="true"' : ''}>${cards}</div>
         <p class="small muted mt" style="margin-bottom:0">
           A service is only counted healthy if an <em>authenticated</em> call succeeds —
           a wrong API key against an open health endpoint would otherwise look fine.
@@ -923,6 +1419,8 @@ async function viewService(name) {
             </div>
           </div>
           <span class="grow"></span>
+          ${d.breaker && d.breaker.state !== 'closed' ? `
+            <button class="tiny" onclick="clearBreaker('${d.service}', this)">Clear hold</button>` : ''}
           ${d.service !== 'settings' ? `
             <button class="primary" onclick="testService('${d.service}', this)">Test now</button>` : ''}
           ${d.login_url ? `<button onclick="window.location='${d.login_url}'">Sign in</button>` : ''}
@@ -1037,6 +1535,39 @@ async function retryBook(bookId, btn) {
   finally { if (btn) btn.disabled = false; }
 }
 
+/* Release a service's breaker by hand — the panel's way out of a hold.
+ *
+ * It is here because every other exit from a hold is the service answering,
+ * and a breaker wedged with no evidence to answer *with* has no other exit at
+ * all: no cooldown that closes it, no restart that clears it (the state is a
+ * row in the database), and nothing in the panel that could. The failure it
+ * rescues you from is silent, so the hatch is on the two rows that show the
+ * hold (the dashboard's, the service page's) rather than buried in settings.
+ *
+ * Confirmed, because this releases every book the service is holding at once
+ * and the button cannot know whether the service is really back: the dialog
+ * says so in as many words, and the toast afterwards repeats what the breaker
+ * did rather than congratulating anyone on a recovery.
+ */
+async function clearBreaker(service, btn) {
+  const label = labelForService(service);
+  const ok = window.confirm(
+    `Clear ${label}'s breaker?\n\n` +
+    `This releases every book it is holding. Nothing has proved ${label} is ` +
+    `answering — if it is still down, the next sweep will hold everything again.`
+  );
+  if (!ok) return;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api(`/api/services/${encodeURIComponent(service)}/breaker/clear`,
+                        { method: 'POST' });
+    toast(r.cleared ? `Cleared ${label}'s hold` : `Nothing to clear`,
+          r.message || '', r.cleared ? 'ok' : '');
+    await refresh();
+  } catch (err) { toast('Could not clear it', err.message, 'err'); }
+  finally { if (btn) btn.disabled = false; }
+}
+
 async function retryGroup(stage) {
   const targets = filteredBooks().filter(b =>
     ((b.stages || {})[stage] || {}).status === 'failed');
@@ -1108,17 +1639,49 @@ async function reconcileNow(btn) {
   finally { if (btn) { btn.disabled = false; btn.textContent = 'Check shelf'; } }
 }
 
+/* Re-check every service. The endpoint runs check_all(): six sequential
+ * authenticated probes, each with its own 30-second timeout (app/health.py,
+ * app/clients/base.py), so on a stack with a host that is routable but not
+ * answering this is the longest wait in the app — seconds to minutes. For the
+ * whole of it the rail and the services page say "testing…".
+ *
+ * The state is `healthChecks`, not this button: the 6-second poll replaces
+ * #rail's markup, so `btn` is detached by the time the request returns and the
+ * finally below cannot use it to put anything back. A count rather than a flag
+ * so two overlapping presses (the rail's button and the page's are on screen
+ * together on #/services) cannot leave one of them holding the state open.
+ */
 async function recheckServices(btn) {
-  if (btn) btn.disabled = true;
+  healthChecks++;
+  // Instant feedback on the button that was pressed, before the repaint. This
+  // node may not survive to be un-set, which is fine — the repaint is what
+  // puts the label and the disabled attribute back, from the counter.
+  if (btn) { btn.disabled = true; btn.textContent = 'testing…'; }
+  // renderRail() is called directly as well as through render(): on the book,
+  // service and version routes render() awaits a fetch before it reaches the
+  // rail, and the rail is the thing that was just pressed.
+  renderRail();
+  render().catch(() => {});
   try {
     const r = await api('/api/health/services/check', { method: 'POST' });
     const bad = r.unhealthy || [];
     toast(bad.length ? `${bad.length} service(s) unhealthy` : 'All services healthy',
       bad.length ? bad.map(s => `${s.label}: ${s.detail}`).join(' · ').slice(0, 200) : '',
       bad.length ? 'err' : 'ok');
-    await refresh();
   } catch (err) { toast('Health check failed', err.message, 'err'); }
-  finally { if (btn) btn.disabled = false; }
+  finally {
+    healthChecks--;
+    // The real values come back on every path. refresh() re-reads /api/state,
+    // which is where check_all() wrote what it just found — so what is shown
+    // after this is the server's answer, not the pre-click numbers.
+    try { await refresh(); } catch (err) { render().catch(() => {}); }
+    // ...and the rail is repainted unconditionally afterwards, not left to
+    // refresh() to do. refresh() has a catch of its own: when /api/state is the
+    // thing that is failing it writes the failure into #view and never reaches
+    // render() at all, so the rail kept the testing marker until a poll finally
+    // succeeded. A state that resolves only when the outage ends is stuck.
+    finally { renderRail(); }
+  }
 }
 
 async function testService(service, btn) {
@@ -1173,6 +1736,7 @@ async function render() {
 
   let html;
   if (r.name === 'books') html = viewBooks();
+  else if (r.name === 'genres') html = viewGenres();
   else if (r.name === 'book') html = await viewBook(r.param);
   else if (r.name === 'services') html = viewServices();
   else if (r.name === 'service') html = await viewService(r.param);
@@ -1194,6 +1758,12 @@ async function refresh() {
   try {
     const r = route();
     const wantsSettings = r.name === 'services' || r.name === 'service';
+    // The Genres page needs the one payload /api/state does not carry: the
+    // folder and notebook each category maps to, which exist only in
+    // /api/categories. Without this gate the two columns render blank — and a
+    // blank cell is indistinguishable from "no notebook configured", which is
+    // a real state this page has to tell apart.
+    const wantsCategories = r.name === 'genres';
     const [s, i] = await Promise.all([
       api('/api/state'),
       api('/api/issues').catch(() => null),
@@ -1202,6 +1772,34 @@ async function refresh() {
     issues = i;
     if (wantsSettings && !settingsFields) {
       settingsFields = await api('/api/settings').catch(() => null);
+    }
+    // Retried on every visit while it is missing, so a failure is self-healing
+    // rather than something the operator has to reload for.
+    if (wantsCategories && !categoryMap) {
+      try {
+        const payload = await api('/api/categories');
+        // Take it only if it is actually the shape the page renders from.
+        // `api()` hands back `{raw: text}` for a 200 that is not JSON and
+        // `null` for an empty one, and either would otherwise be stored as
+        // authoritative: `categoryFolder()` falls back to the category name,
+        // so the page would print a *guessed* directory as though it were the
+        // configured one. On a page whose entire job is telling the operator
+        // where their books go, a wrong path is worse than an absent one —
+        // they would audit their libraries against it and find nothing wrong.
+        const shaped = payload && typeof payload === 'object'
+          && payload.categories && typeof payload.categories === 'object'
+          && !Array.isArray(payload.categories);
+        if (shaped) {
+          categoryMap = payload;
+          categoryMapError = '';
+        } else {
+          categoryMap = null;
+          categoryMapError = 'the response carried no category map';
+        }
+      } catch (err) {
+        categoryMap = null;
+        categoryMapError = err.message;
+      }
     }
     await render();
   } catch (err) {
