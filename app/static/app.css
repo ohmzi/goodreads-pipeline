@@ -595,14 +595,15 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
   color: #f2f2f2; background-color: var(--press-dark); text-decoration: none;
 }
 
-/* Sign out takes the same treatment: it sat as a plain teal link, the one
-   spot in the header not drawn as a nav item, for no reason tied to what it
-   does — it is exactly as much "a section of this bar" as Home is. */
+/* Sign out takes the same geometry as a nav item — same bar, same section —
+   but not the same resting ink: brown read as "go here", and this one ends
+   the session rather than taking you anywhere, which is what --err (the
+   same red every failure in the app uses) is for. */
 .bar-account { display: flex; align-items: stretch; }
 .bar-account .nav-link {
   display: inline-block;
   font-size: 16px; line-height: var(--header-h); padding: 0 20px;
-  color: var(--bar-ink); text-decoration: none; white-space: nowrap;
+  color: var(--err); text-decoration: none; white-space: nowrap;
 }
 .bar-account .nav-link:hover {
   color: #f2f2f2; background-color: var(--bar-hover); text-decoration: none;
@@ -2158,10 +2159,10 @@ a[target="_blank"]:active {
   .bar.menu-open .acct-panel .nav-link {
     height: auto; line-height: 1.3; padding: 2px 4px; font-size: 14px;
   }
-  .bar.menu-open .acct-panel .health-pill:hover,
-  .bar.menu-open .acct-panel .nav-link:hover {
-    background: none; color: var(--teal);
-  }
+  /* Health goes to a page (teal, the app's one action colour); Sign out ends
+     the session and keeps its own red rather than borrowing that one. */
+  .bar.menu-open .acct-panel .health-pill:hover { background: none; color: var(--teal); }
+  .bar.menu-open .acct-panel .nav-link:hover { background: none; text-decoration: underline; }
 
   .page { padding: 12px; }
 
