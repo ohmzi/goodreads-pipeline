@@ -474,31 +474,20 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
   margin: 9px 8px 0 0; align-self: flex-start;
 }
 
-/* .searchBox__input--navbar/--library: 32px tall, 1px #D8D8D8 (their most-used
-   border, --line), 3px radius (--radius), padding 4px 26px 4px 8px — the 26px
-   right inset is the magnifier's slot, not spacing, and is why the padding is
-   the declaration most worth defending here.
-   Specificity: the input rule further down is also (0,1,1) and comes later in
-   the file, so it would win on source order, taking that 26px slot and resetting
-   the label to its 13px. The extra .bar step exists only to keep the slot; it is
-   not a design choice. font-family is declared because an <input> does not
-   inherit one. */
+/* Rounded to a full pill (radius = half the 32px height), same shape and
+   same "looks the same whether empty, typed-in, or focused" as the mobile
+   expanded search box — asked for explicitly there, twice, and matched here
+   for the opposite reason: two different treatments for the one control
+   depending on viewport width read as two different controls. */
 .bar .bar-search input {
   width: 100%; height: 32px;
-  border: 1px solid var(--line); border-radius: var(--radius);
-  padding: 4px 26px 4px 8px;
+  border: 1px solid var(--line); border-radius: 16px;
+  padding: 4px 26px 4px 14px;
   font-family: var(--sans); font-size: 14px; color: var(--ink);
   background: var(--paper);
 }
-/* .searchBox__input has no :focus rule in their stylesheet; the teal border is
-   the app's affordance, on the same accent a link uses. outline:none is scoped
-   to :not(:focus-visible) so it cannot outrank the 2px ring declared at the top
-   of the file — this selector is (0,3,1) against input:focus-visible's (0,1,1),
-   so an unguarded outline:none would silently remove the only focus cue on the
-   header's only text field, which is a WCAG 2.4.7 regression, not a style
-   preference. */
-.bar-search input:focus { border-color: var(--teal); }
-.bar-search input:focus:not(:focus-visible) { outline: none; }
+.bar-search input:focus { border-color: var(--line); }
+.bar-search input:focus-visible { outline: none; }
 /* --ghost #757575, this app's deliberate darkening of their .greyText #999999
    (2.81:1 on white — unusable at 14px); #757575 holds 4.61:1 (§7). */
 .bar-search input::placeholder { color: var(--ghost); }
@@ -581,40 +570,46 @@ select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
 .menu-toggle .dot { width: 8px; height: 8px; }
 
 /* No Goodreads equivalent — the always-visible answer to "is anything broken
-   right now", one click from the page that explains and logs it. Geometry
-   derived from .gr-button geometry at .gr-button--small's inset (3px radius,
-   1px border, Lato, line-height:1), the nearest real control: a header chip is a
-   small target beside full-height nav links, so it sits on the bar's baseline
-   rather than filling it. The two problem states reuse the .flashNotification
-   surfaces verbatim, so a broken service reads in the header exactly as it does
-   in the banner below it. */
+   right now", one click from the page that explains and logs it.
+
+   DEPARTURE FROM REF §4: this used to be its own chip — cream fill, its own
+   border and radius, a smaller face — sitting next to Sign out's plain teal
+   link, so the bar read as three different controls (nav tabs, a status
+   chip, an action link) rather than one bar. Restyled onto the exact nav
+   link rule below: same 16px/50px/30px geometry, same "no fill until you
+   touch it" rest state, same dark-fill hover and press. The colour dot
+   still carries the health state — it is information the nav links have no
+   equivalent of — but the pill around it is gone. */
 .health-pill {
-  display: inline-flex; align-items: center; gap: 6px; align-self: center;
-  background: var(--cream); border: 1px solid var(--line-warm); border-radius: var(--radius);
-  padding: 4px 12px; font-size: 12px; line-height: 1; color: var(--ink-2);
+  display: inline-flex; align-items: center; gap: 8px;
+  height: var(--header-h); padding: 0 20px;
+  font-size: 16px; color: var(--bar-ink);
   text-decoration: none; white-space: nowrap;
 }
-/* .flashNotification.error — 11.74:1 (§7). */
-.health-pill.bad  { background: var(--alert-err-bg); border-color: var(--alert-err-line); color: var(--err); }
-/* .gr-errorMessage / .gr-button--choice — 5.95:1 (§7). */
-.health-pill.warn { background: var(--alert-warn-bg); border-color: var(--alert-warn-line); color: var(--warn); }
-/* The two pointer states, declared after the two alert surfaces above on
-   purpose. `.health-pill.bad` and `.health-pill:hover` are both (0,2,0), so at
-   equal weight the later rule wins — and the alert surface used to come last,
-   which made the pill the header shows when something is *wrong* the one pill
-   that did not respond to the pointer at all. The alert is not lost by this:
-   the ink and the border stay red on hover, and only the fill moves, so the
-   pill still says "services need attention" while it also says "you are
-   pointing at me".
-   --cream-3 is .gr-button:hover; --line-warm is .gr-button:active, the design
-   system's pressed fill, and the same step every cream control in the app goes
-   down (--cream → --cream-3 → --line-warm). */
-.health-pill:hover { background: var(--cream-3); color: var(--ink-2); text-decoration: none; }
-.health-pill:active { background: var(--line-warm); color: var(--ink-2); text-decoration: none; }
+.health-pill.bad  { color: var(--err); }
+.health-pill.warn { color: var(--warn); }
+.health-pill:hover, .health-pill.bad:hover, .health-pill.warn:hover {
+  color: #f2f2f2; background-color: var(--bar-hover); text-decoration: none;
+}
+.health-pill:active, .health-pill.bad:active, .health-pill.warn:active {
+  color: #f2f2f2; background-color: var(--press-dark); text-decoration: none;
+}
 
-/* .siteHeader__personal{margin:0 8px 0 0} plus the app's gap; the block holds
-   #headline and the sign-out button, both vertically centred. */
-.bar-account { display: flex; align-items: center; gap: 8px; padding-left: 8px; }
+/* Sign out takes the same treatment: it sat as a plain teal link, the one
+   spot in the header not drawn as a nav item, for no reason tied to what it
+   does — it is exactly as much "a section of this bar" as Home is. */
+.bar-account { display: flex; align-items: stretch; }
+.bar-account .nav-link {
+  display: inline-block;
+  font-size: 16px; line-height: var(--header-h); padding: 0 20px;
+  color: var(--bar-ink); text-decoration: none; white-space: nowrap;
+}
+.bar-account .nav-link:hover {
+  color: #f2f2f2; background-color: var(--bar-hover); text-decoration: none;
+}
+.bar-account .nav-link:active {
+  color: #f2f2f2; background-color: var(--press-dark); text-decoration: none;
+}
 
 /* #headline: "Goodreads / <session age>", two right-aligned lines. --muted
    #666666 and NOT --faint #767676: faint measures 4.29:1 on the #faf8f6 bar and
@@ -2154,6 +2149,19 @@ a[target="_blank"]:active {
     box-shadow: var(--shadow-float);
   }
   .bar.menu-open .bar-account { padding-left: 0; }
+  /* .health-pill and .nav-link now carry the desktop nav-link geometry
+     (50px tall, 20px padding, edge-to-edge dark-fill hover) so the header
+     reads as one bar there — but inside this compact popover that geometry
+     is oversized and the full-bleed hover has no edge to run to. Both drop
+     back to a plain, small, centred line for this context specifically. */
+  .bar.menu-open .acct-panel .health-pill,
+  .bar.menu-open .acct-panel .nav-link {
+    height: auto; line-height: 1.3; padding: 2px 4px; font-size: 14px;
+  }
+  .bar.menu-open .acct-panel .health-pill:hover,
+  .bar.menu-open .acct-panel .nav-link:hover {
+    background: none; color: var(--teal);
+  }
 
   .page { padding: 12px; }
 
