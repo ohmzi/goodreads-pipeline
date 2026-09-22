@@ -1115,16 +1115,45 @@ a.chip.svc-tag:active {
 .sk-n    { width: 52px; height: 22px; }    /* stands in for the 24px numeral */
 .sk-k    { width: 76%; height: 9px; margin-top: 8px; }   /* ...and the 12px label */
 .sk-head { width: 132px; height: 9px; }    /* the panel's own 12px uppercase h2 */
+.sk-head.short { width: 96px; }
+.sk-btn  { width: 66px; height: 18px; border-radius: var(--radius); }
+.sk-btn.wide { width: 50%; }
 
-/* Three rows under the heading, at descending widths: a block of identical
-   bars reads as a pattern, and a pattern reads as decoration rather than as
-   content that has not arrived yet. */
-.sk-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; }
-.sk-row + .sk-row { border-top: 1px solid var(--line-soft); }
-.sk-a { width: 30%; height: 10px; flex: none; }
-.sk-b { width: 52%; height: 10px; }
-.sk-row:nth-child(2) .sk-b { width: 64%; }
-.sk-row:nth-child(3) .sk-b { width: 41%; }
+/* The .stage-row tracks are 138px / 112px / 1fr / auto, and these fill them:
+   a name over a count, the service chip, two lines of detail, an action. Widths
+   vary per row below so a stack of them reads as content that has not arrived
+   rather than as a repeating pattern, which is what reads as decoration. */
+.sk-w1   { width: 62%; height: 11px; }
+.sk-w2   { width: 44%; height: 9px; margin-top: 6px; }
+.sk-chip { width: 74px; height: 17px; border-radius: var(--radius); }
+.sk-l1   { width: 88%; height: 10px; }
+.sk-l2   { width: 62%; height: 10px; margin-top: 7px; }
+.stage-row:nth-child(3) .sk-l1 { width: 72%; }
+.stage-row:nth-child(3) .sk-l2 { width: 48%; }
+.stage-row:nth-child(4) .sk-l1 { width: 94%; }
+.stage-row:nth-child(5) .sk-l2 { width: 35%; }
+
+/* The log's own three tracks: 104px stamp, 110px service, then the line. */
+.sk-t { width: 82px;  height: 9px; }
+.sk-s { width: 70%;   height: 9px; }
+.sk-m { width: 86%;   height: 9px; }
+.ev:nth-child(2) .sk-m { width: 64%; }
+.ev:nth-child(3) .sk-m { width: 92%; }
+
+/* The rail: seven service rows on the real 9px/1fr/max-content tracks, the run
+   control card, and the version pill. Without these the skeleton was a narrow
+   column against an empty half-page, which is not the shape the dashboard has. */
+.sk-dot  { width: 9px; height: 9px; border-radius: 50%; margin-top: 3px; }
+.sk-name { width: 64%; height: 10px; }
+.sk-note { width: 46px; height: 9px; }
+.svc-row:nth-child(2) .sk-name { width: 48%; }
+.svc-row:nth-child(4) .sk-name { width: 57%; }
+.svc-row:nth-child(6) .sk-name { width: 71%; }
+.sk-btnrow { display: flex; gap: 8px; margin-bottom: 12px; }
+.sk-ver  { width: 100%; height: 22px; border-radius: var(--radius); }
+/* .svc-row carries cursor:pointer for the real, clickable row; these are
+   aria-hidden placeholders and are not going anywhere. */
+.boot-rail .svc-row { cursor: default; }
 
 @keyframes sk-sheen { to { background-position: -200% 0; } }
 @keyframes boot-in  { to { opacity: 1; } }
