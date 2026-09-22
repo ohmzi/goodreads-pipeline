@@ -196,7 +196,16 @@ def run(book: dict) -> models.StageResult:
         if f".{suffix}" in {".epub", ".pdf", ".txt", ".md", ".docx", ".html", ".htm"}:
             client = OpenNotebookClient()
             try:
-                source_id = client.source_exists_for_path(to_opennotebook_path(ebook))
+                # Ask about the id `notebook` recorded before hunting for the
+                # path. The path scan has to page through every source in the
+                # service; the id is one request and cannot be missed by a
+                # short page. Reading the list first is what reported 104
+                # present books as absent.
+                source_id = str((db().stage(book_id, "notebook") or {}).get("artifact") or "")
+                if source_id and not client.source_exists(source_id):
+                    source_id = ""
+                if not source_id:
+                    source_id = client.source_exists_for_path(to_opennotebook_path(ebook))
                 if not source_id:
                     missing.append("Open Notebook")
                     notes.append("Open Notebook: no source for this file")
@@ -261,8 +270,22 @@ def run(book: dict) -> models.StageResult:
             f"{summary} — forcing a rescan (attempt {rescans + 1} of {MAX_RESCANS})"
         )
 
+    # `notfound`, not `server`. Every service here answered — it ran the search
+    # and returned no match — so calling this a server error was wrong twice
+    # over. It told the breaker nothing was reachable when everything was, and
+    # it put "The service returned an error — usually transient; retry" on the
+    # operator's panel for 105 books, which is not what happened and not a fix:
+    # retrying a search that correctly returns nothing returns nothing again.
+    # `notfound` is already the vocabulary's word for "the service says the
+    # thing does not exist", and `answered=True` keeps it out of the breaker's
+    # outage arithmetic.
+    #
+    # The service is named when exactly one is at fault, which is the common
+    # case and the difference between "something is missing somewhere" and
+    # "Kavita has not indexed this". With several, the names stay in `detail`.
     return models.StageResult.failed(
         f"{summary} — still missing after {MAX_RESCANS} rescans, so this needs "
         f"a look at the service itself",
-        kind="server",
+        kind="notfound", answered=True,
+        service=(missing[0] if len(missing) == 1 else ""),
     )

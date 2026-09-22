@@ -17,6 +17,7 @@ from pathlib import PurePosixPath
 from .. import models
 from ..clients.base import ClientError
 from ..clients.opennotebook import OpenNotebookClient, to_opennotebook_path
+from ..db import db
 from . import classify
 from .place import placed_paths
 
@@ -94,9 +95,26 @@ def run(book: dict) -> models.StageResult:
         notebook_id = str(notebook.get("id") or "")
 
         # Reuse an existing source for this file rather than adding the book a
-        # second time. `source_exists_for_path` reads the list endpoint, which
-        # does carry `asset`; only the notebook membership is missing there.
-        source_id = client.source_exists_for_path(on_path)
+        # second time.
+        #
+        # The id we created last time is recorded on this stage row, so ask
+        # about *it* first: one `GET /api/sources/{id}` against a known id,
+        # instead of paging the whole source list looking for a path. That is
+        # not only cheaper, it is the reliable order. Searching the list first
+        # is what failed before — the endpoint pages silently at 50 rows, the
+        # search missed, and the stage added the book again, every sweep, for
+        # 4,271 redundant sources. A recorded id cannot miss that way.
+        duplicates: list[str] = []
+        source_id = ""
+        recorded = str((db().stage(book_id, "notebook") or {}).get("artifact") or "")
+        if recorded and client.source_exists(recorded):
+            source_id = recorded
+        else:
+            # No id recorded, or it has since been deleted. Fall back to the
+            # path scan, which now walks every page.
+            existing = client.sources_for_path(on_path)
+            duplicates = existing[1:]
+            source_id = existing[0] if existing else ""
         reused = bool(source_id)
         if not source_id:
             source_id = client.create_source_from_path(on_path, title=book["title"])
@@ -141,6 +159,13 @@ def run(book: dict) -> models.StageResult:
         detail += ")"
         if len(state["notebooks"]) > 1:
             detail += f" [also in {len(state['notebooks']) - 1} other notebook(s)]"
+        if duplicates:
+            # Named, not deleted. These are this app's own litter from before
+            # the paging bug was fixed, but they are rows in someone else's
+            # service and removing them is not a side effect a per-book stage
+            # should have. `cleanup_duplicate_sources` does it on request.
+            detail += (f" [{len(duplicates)} duplicate source(s) of this file "
+                       f"remain — run the Open Notebook cleanup to remove them]")
         # Named so `pipeline._advance` can feed it to `breaker.record_success`.
         return models.StageResult.ok(detail, artifact=source_id,
                                      service=client.name)

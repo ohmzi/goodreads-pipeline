@@ -5,7 +5,7 @@
 **Watches a Goodreads _to-read_ shelf and carries each new book all the way to a
 shelved, indexed library — without ever making a second copy of a file.**
 
-[![Version](https://img.shields.io/badge/version-1.2.0-382110?style=for-the-badge)](docs/VERSION.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-382110?style=for-the-badge)](docs/VERSION.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-00635d?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)](requirements.txt)
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)

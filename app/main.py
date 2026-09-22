@@ -630,7 +630,7 @@ def issues() -> dict:
     attached. "no audiobook releases found" is not a bug and should not sit in
     the same list as "Kavita rejected your API key", which is.
     """
-    from .health import IMPACT, canonical, label_for
+    from .health import IMPACT, canonical, label_for, service_for_stage
 
     books = db().list_books()
     groups: dict[tuple[str, str, str, str], dict] = {}
@@ -704,10 +704,12 @@ def issues() -> dict:
             "service": svc,
             "service_label": label_for(svc),
             "impact": IMPACT.get(svc, ""),
-            "detail": breaker.headline(svc, len(books_held), hours),
+            "detail": breaker.headline(svc, len(books_held), hours,
+                                       row.get("last_failure") or ""),
             "sample": row.get("last_failure") or "",
             "books": books_held,
-            "fix": _fix_for_breaker(svc, row["state"], hours),
+            "fix": _fix_for_breaker(svc, row["state"], hours,
+                                    row.get("last_failure") or ""),
             # Required for the row to render at all (`renderIssuePreview`
             # filters on it), and not a claim that the operator can *do*
             # something — the `fix` line is what says otherwise. Dropping it
@@ -715,6 +717,31 @@ def issues() -> dict:
             # books sat untouched.
             "actionable": True,
         }
+
+    # A group whose service is currently held cannot be retried into anything
+    # but the hold it is already waiting on. The panel used to offer "Retry
+    # all" on 18 parked audiobooks while Shelfmark's breaker was open, which
+    # spends the operator's attention to re-queue them into the same wait — and
+    # reads as though the failure were theirs to fix when the service is down.
+    #
+    # `actionable` is deliberately left alone: the preview filters on it before
+    # it ever reaches this row, so flipping it to False would make the group
+    # disappear from "What needs you" rather than show it differently — the
+    # exact failure mode `IMPACT`/`actionable=True` on the breaker's own row
+    # above already exists to avoid. `blocked_by` instead tells the UI to swap
+    # the button for a link to the thing actually in the way.
+    open_now = breaker.open_breakers()
+    for group in groups.values():
+        if group["stage"] == "held":
+            continue
+        blocker = canonical(group["service"]) or service_for_stage(group["stage"])
+        if blocker and blocker in open_now:
+            group["blocked_by"] = blocker
+            group["fix"] = (
+                f"{label_for(blocker)} is held right now, so retrying these "
+                f"cannot get further than the hold. Wait for it to clear, then "
+                f"retry. Original cause: {group['fix']}"
+            )
 
     ordered = sorted(
         groups.values(),
@@ -763,12 +790,39 @@ def _cause_bucket(stage: str, kind: str, detail: str) -> tuple[str, str]:
         return "busy", "The service is rate-limiting requests"
     if kind == "server":
         return f"server:{detail[:60].lower()}", detail[:160]
-    if "shelfmark reported" in lowered:
+    if stage == "verify" and "missing from" in lowered:
+        # Grouped by *which services* are missing it, not by the whole
+        # sentence. The rest of `detail` names the book's own search terms, so
+        # bucketing on the raw text gives one group per book — which is how 105
+        # books arrived as a wall of near-identical rows.
+        who = detail.split("MISSING from", 1)[1].split("|", 1)[0].strip(" —")
+        return f"unindexed:{who.lower()}", f"In the library, but not indexed by {who}"
+    if "shelfmark reported" in lowered or (
+        "tried all" in lowered and "every download failed" in lowered
+    ):
+        # Two messages, one fact: `_watch` reports the first as soon as a
+        # queued release comes back failed; `_pick` reports the second on a
+        # later sweep once every candidate is exhausted and none of them is
+        # left to try. Both mean "Shelfmark accepted releases for this book
+        # and every one died," so both get the one row this bucket exists for.
         return "shelfmark-error", "Shelfmark failed to download these"
     if "csrf" in lowered or "session" in lowered and "goodreads" in lowered:
         return "goodreads-session", "Goodreads session expired"
     if stage == "notebook" and "cannot read" in lowered:
         return "format", "File format Open Notebook cannot read"
+    if stage in ("acquire_ebook", "acquire_audiobook") and kind == "data":
+        # A safety net under the two checks above, not a replacement for them:
+        # this only catches what neither named pattern did. Every `data`
+        # failure on these two stages is this same class of fact — no usable
+        # release could be gotten for this book — however it ends up worded,
+        # and every wording embeds the book's own title. Bucketing on the raw
+        # text before this check existed put the title in the key, and a
+        # title never repeats: on this operator's own backlog it produced 69
+        # one-book rows, including several from a message this code no longer
+        # even writes — proof that matching exact phrasing here is not
+        # something a future wording change can be trusted not to break again.
+        which = "an audiobook" if stage == "acquire_audiobook" else "an ebook"
+        return f"acquire-data:{stage}", f"Could not get {which} for these"
     return f"other:{detail[:60].lower()}", detail[:160] or "Failed"
 
 
@@ -927,6 +981,17 @@ def _fix_for(stage: str, kind: str, detail: str, service: str = "") -> str:
     if kind == "busy":
         return (f"{who + ' is rate-limiting requests' if who else 'The service is rate-limiting requests'}"
                 f" — the pipeline slows down and retries. Nothing to fix unless it lasts; check {where}.")
+    if stage == "verify" and kind == "notfound":
+        # Deliberately not "retry". The searches ran and came back empty, so
+        # running them again returns empty again; what is worth checking is
+        # whether the service is scanning the folder the file is actually in.
+        from .stages.verify import MAX_RESCANS
+
+        target = detail.split("MISSING from", 1)[1].split("|", 1)[0].strip(" —") \
+            if "MISSING from" in detail else (who or "the service")
+        return (f"The file is in the library, but {target} still does not list it "
+                f"after {MAX_RESCANS} rescans. Check that library's folders cover "
+                f"where the book was placed, then retry.")
     if "no audiobook releases" in lowered:
         return "No audiobook exists in any configured source. Nothing to fix; retry later or shelve the ebook alone."
     if "no ebook releases" in lowered:
@@ -942,7 +1007,8 @@ def _fix_for(stage: str, kind: str, detail: str, service: str = "") -> str:
     return "Retry from the book's detail view; if it persists, check the service's logs."
 
 
-def _fix_for_breaker(service: str, state: str, hours: float = 0.0) -> str:
+def _fix_for_breaker(service: str, state: str, hours: float = 0.0,
+                     last_failure: str = "") -> str:
     """What to do about a held service — usually "nothing, yet".
 
     The escalation is the part that matters. A young outage really is not the
@@ -957,6 +1023,14 @@ def _fix_for_breaker(service: str, state: str, hours: float = 0.0) -> str:
 
     who = label_for(service)
     where = f"{who}'s service page"
+    # An upstream that states its own resume time has answered the only
+    # question this row raises. Said first, because "nothing to fix" is a much
+    # easier thing to accept once you know when it ends.
+    resume = breaker.resume_note(last_failure)
+    if resume:
+        return (f"Nothing to fix{resume.replace(' — it says', ' — {} says'.format(who), 1)}. "
+                f"The held books resume on their own; open {where} to see the "
+                f"full message.")
     if hours >= TRANSIENT_GRACE_HOURS:
         return (
             f"{who} has been unable to reach its sources for {hours:.0f} hours "

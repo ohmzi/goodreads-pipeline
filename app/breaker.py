@@ -36,6 +36,7 @@ constant here with a pointer back to the original rather than an import.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from datetime import datetime, timezone
@@ -926,7 +927,64 @@ def hold_detail(service: str, said: str = "") -> str:
     return text + " — retries by itself when it recovers"
 
 
-def headline(service: str, count: int, hours: float = 0.0) -> str:
+#: A resume time stated in an upstream's own error text.
+#:
+#: Some upstreams say when they will be usable again in prose rather than in a
+#: `Retry-After` header, and that sentence reaches us intact inside
+#: `last_failure`. Shelfmark relays Prowlarr's verbatim: `every indexer is
+#: disabled by Prowlarr after recent failures (until 2026-09-22T12:17:04Z)`.
+#: Nothing read it, so the panel could only offer "these resume by themselves
+#: once Shelfmark answers again" while holding 211 books — true, and missing
+#: the one fact the operator wanted, which is *when*.
+_UNTIL = re.compile(
+    r"until\s+(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?Z?(?:[+-]\d{2}:?\d{2})?)",
+    re.IGNORECASE,
+)
+
+
+def stated_resume_at(detail: str | None) -> datetime | None:
+    """When the upstream said it would be usable again, if it said.
+
+    Read for display only. It deliberately does not extend the hold: the cap in
+    `wait_seconds` exists because an upstream-controlled duration is not a
+    promise we can act on, and this is the same number arriving by a less
+    trustworthy route. Telling the operator what the service claimed is useful
+    even when believing it would not be.
+    """
+    match = _UNTIL.search(detail or "")
+    if not match:
+        return None
+    text = match.group(1).replace(" ", "T")
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
+def resume_note(detail: str | None) -> str:
+    """" — it says it will be back in 3h" for the panel, or "".
+
+    Only forward-looking: a timestamp that has already passed says nothing
+    about now, and repeating it would read as though the outage were expected
+    to continue.
+    """
+    when = stated_resume_at(detail)
+    if when is None:
+        return ""
+    hours = (when - datetime.now(timezone.utc)).total_seconds() / 3600
+    if hours <= 0:
+        return ""
+    if hours < 1:
+        return f" — it says the block lifts in {hours * 60:.0f} min"
+    return (f" — it says the block lifts in {hours:.0f}h, at "
+            f"{when.astimezone().strftime('%H:%M')}")
+
+
+def headline(service: str, count: int, hours: float = 0.0,
+             last_failure: str = "") -> str:
     """The one line the operator's panel shows for a held service."""
     books = "book" if count == 1 else "books"
     line = (
@@ -935,7 +993,7 @@ def headline(service: str, count: int, hours: float = 0.0) -> str:
     )
     if hours >= 1:
         line += f", for {hours:.0f} hour{'s' if hours >= 2 else ''}"
-    return line
+    return line + resume_note(last_failure)
 
 
 def age_hours(opened_at: str | None) -> float:

@@ -449,13 +449,16 @@ def cmd_report(args: argparse.Namespace) -> int:
 def cmd_repair(args: argparse.Namespace) -> int:
     """Fix the gaps verification finds, rather than only reporting them.
 
-    Three things go wrong often enough to be worth automating:
+    Four things go wrong often enough to be worth automating:
+      * several sources pointing at the *same file* — the litter left by the
+        paging bug in `source_exists_for_path`, which stopped the "have we
+        added this already?" check from ever seeing past the newest 50 rows;
       * a source attached to its notebook more than once (the attach endpoint
         appends instead of being idempotent, so retries stacked up links);
       * a source that was created but never attached;
       * a book missing from a service, which a rescan usually fixes.
 
-    Dry-run unless --apply, because the first two write to Open Notebook.
+    Dry-run unless --apply, because the first three write to Open Notebook.
     """
     import json
 
@@ -473,18 +476,63 @@ def cmd_repair(args: argparse.Namespace) -> int:
         rows = db().query(
             "SELECT id, title, category FROM books ORDER BY id"
         )
+
+        # One walk of the source list for the whole run, indexed by the path
+        # each source points at. Asking per book instead means paging the
+        # entire service once per book — 394 books against 4,665 sources, at
+        # six seconds a page — which is not a repair anyone waits for.
+        print("  reading Open Notebook's sources...", flush=True)
+        by_path: dict[str, list[tuple[str, str]]] = {}
+        for item in client.iter_sources():
+            asset = item.get("asset")
+            path = ""
+            if isinstance(asset, dict):
+                path = str(asset.get("file_path") or "")
+            elif asset:
+                path = str(asset)
+            if path:
+                by_path.setdefault(path, []).append(
+                    (str(item.get("created") or ""), str(item.get("id") or ""))
+                )
+        for ids in by_path.values():
+            ids.sort()
+        print(f"  {sum(len(v) for v in by_path.values())} source(s) "
+              f"over {len(by_path)} distinct file(s)\n")
+
         dup = unattached = ok = 0
+        copies = removed = 0
         for row in rows:
             ebook = placed_paths(row["id"]).get("ebook")
             if not ebook:
                 continue
             try:
-                source_id = client.source_exists_for_path(to_opennotebook_path(ebook))
+                on_path = to_opennotebook_path(ebook)
             except Exception as exc:  # noqa: BLE001
                 print(f"  !! {row['title'][:40]}: {type(exc).__name__}")
                 continue
-            if not source_id:
+            found = [sid for _created, sid in by_path.get(on_path, []) if sid]
+            if not found:
                 continue
+
+            # Keep the one this book's `notebook` stage recorded, because that
+            # is the id that was attached to the notebook and the id the stage
+            # will now ask about first. Falling back to the oldest only matters
+            # for a book whose stage row has since been reset.
+            recorded = str((db().stage(row["id"], "notebook") or {}).get("artifact") or "")
+            source_id = recorded if recorded in found else found[0]
+            extra = [sid for sid in found if sid != source_id]
+            if extra:
+                copies += len(extra)
+                print(f"  {'removing ' if apply_changes else 'would remove '}"
+                      f"{len(extra):4} duplicate source(s) of {row['title'][:40]}")
+                if apply_changes:
+                    for sid in extra:
+                        try:
+                            client.delete_source(sid)
+                            removed += 1
+                        except Exception as exc:  # noqa: BLE001
+                            print(f"     !! {sid}: {type(exc).__name__}: {exc}")
+
             _folder, notebook_name = classify.destination_for(row["category"] or "")
             if not notebook_name:
                 continue
@@ -492,24 +540,41 @@ def cmd_repair(args: argparse.Namespace) -> int:
             nid = str((notebook or {}).get("id") or "")
             if not nid:
                 continue
-            links = client.source_notebooks(source_id)
-            count = links.count(nid)
-            if count == 1:
-                ok += 1
-            elif count == 0:
-                unattached += 1
-                print(f"  {'fixed ' if apply_changes else 'would fix '}"
-                      f"{row['title'][:44]:46} not attached to '{notebook_name}'")
-                if apply_changes:
-                    client.attach(nid, source_id)
-            else:
-                dup += 1
-                print(f"  {'fixed ' if apply_changes else 'would fix '}"
-                      f"{row['title'][:44]:46} attached {count}x to '{notebook_name}'")
-                if apply_changes:
-                    client.detach(nid, source_id)
-                    client.attach(nid, source_id)
-        print(f"\n  Open Notebook: {ok} correct, {dup} duplicated, {unattached} unattached")
+            # This is a live batch over hundreds of books against a service
+            # this process does not control, and it used to have no guard
+            # here at all: one source gone missing between the listing walk
+            # at the top of this command and this book's turn in the loop
+            # (Open Notebook can drop a source on its own — `notebook`'s own
+            # `ClientError(status=404)` handling exists for the same reason)
+            # raised past every `except` above it and took the rest of the
+            # batch down with it, discarding every result already printed.
+            try:
+                links = client.source_notebooks(source_id)
+                count = links.count(nid)
+                if count == 1:
+                    ok += 1
+                elif count == 0:
+                    unattached += 1
+                    print(f"  {'fixed ' if apply_changes else 'would fix '}"
+                          f"{row['title'][:44]:46} not attached to '{notebook_name}'")
+                    if apply_changes:
+                        client.attach(nid, source_id)
+                else:
+                    dup += 1
+                    print(f"  {'fixed ' if apply_changes else 'would fix '}"
+                          f"{row['title'][:44]:46} attached {count}x to '{notebook_name}'")
+                    if apply_changes:
+                        client.detach(nid, source_id)
+                        client.attach(nid, source_id)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  !! {row['title'][:40]}: {type(exc).__name__}: {exc}")
+        print(f"\n  Open Notebook: {ok} correct, {dup} duplicated link(s), "
+              f"{unattached} unattached")
+        if copies:
+            print(f"  Open Notebook: {copies} duplicate source(s) of files that "
+                  f"were already there"
+                  + (f" — {removed} removed" if apply_changes else
+                     " — re-run with --apply to remove them"))
     finally:
         client.close()
 

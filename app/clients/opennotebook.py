@@ -75,6 +75,75 @@ class OpenNotebookClient(ServiceClient):
             raise ClientError(self.name, f"source created but no id returned: {data}")
         return source_id
 
+    #: The largest page `GET /api/sources` will serve. Its own default is 50,
+    #: and it rejects anything above 100 with a 422.
+    SOURCE_PAGE_SIZE = 100
+
+    #: How many pages `iter_sources` will walk before giving up.
+    #:
+    #: A ceiling rather than "until it ends", because the thing this bounds is
+    #: the pathological case: the library that produced this code held 4,665
+    #: sources and each page costs about six seconds, so an unbounded walk is
+    #: five minutes inside a stage that runs once per book per sweep. 50 pages
+    #: is 5,000 sources — far past any real library, and past the duplicate
+    #: pile too — and a scan that hits the ceiling has already proved that
+    #: scanning is the wrong way to answer the question. That is what
+    #: `source_exists_for_path`'s recorded-id path is for.
+    MAX_SOURCE_PAGES = 50
+
+    def iter_sources(self):
+        """Every source, a page at a time.
+
+        `GET /api/sources` is paginated and *silently* so: with no parameters
+        it answers with the newest 50 rows and nothing that says there are
+        more. Reading that one page as though it were the whole list is what
+        created 4,271 duplicate sources — see `source_exists_for_path`.
+        """
+        offset = 0
+        for _ in range(self.MAX_SOURCE_PAGES):
+            data = self.json(
+                "GET", "/api/sources", "list sources",
+                params={"limit": self.SOURCE_PAGE_SIZE, "offset": offset},
+                headers=self._auth(),
+            )
+            items = data if isinstance(data, list) else (data or {}).get("sources", [])
+            items = [item for item in items if isinstance(item, dict)]
+            if not items:
+                return
+            yield from items
+            if len(items) < self.SOURCE_PAGE_SIZE:
+                return
+            offset += len(items)
+
+    def source_exists(self, source_id: str) -> bool:
+        """Whether this exact source is still there.
+
+        One request against `/api/sources/{id}`, rather than hunting for it in
+        a list that has to be paged through. Callers that recorded the id when
+        they created the source should ask this instead.
+        """
+        if not source_id:
+            return False
+        try:
+            data = self.json("GET", f"/api/sources/{source_id}", "read source",
+                             headers=self._auth())
+        except ClientError as exc:
+            if exc.status == 404:
+                return False
+            raise
+        return bool((data or {}).get("id"))
+
+    def delete_source(self, source_id: str) -> None:
+        """Remove a source outright.
+
+        Only ever called to clear this app's own duplicates, and only from
+        `cli repair --apply`, never from a stage: a per-book stage that deletes
+        rows in another service as a side effect is not something an operator
+        can predict or undo.
+        """
+        self.request("DELETE", f"/api/sources/{source_id}", "delete source",
+                     headers=self._auth())
+
     def source_notebooks(self, source_id: str) -> list[str]:
         """Which notebooks a source is attached to.
 
@@ -136,32 +205,64 @@ class OpenNotebookClient(ServiceClient):
                          headers=self._auth())
         return str((data or {}).get("status") or "").lower()
 
+    @staticmethod
+    def _points_at(item: dict, container_path: str) -> bool:
+        """Whether this source row references `container_path`.
+
+        The path is not returned in a clean field: Open Notebook reports it
+        inside `asset` as a *stringified Python dict* — the literal text
+        `{'file_path': '/app/data/uploads/library/…'}` — so an equality check
+        against the path never matches. Match on containment, and handle the
+        case where it is a real dict.
+        """
+        for key in ("file_path", "path", "asset", "url"):
+            value = item.get(key)
+            if not value:
+                continue
+            if isinstance(value, dict):
+                if str(value.get("file_path") or "") == container_path:
+                    return True
+            elif container_path in str(value):
+                return True
+        return False
+
+    def sources_for_path(self, container_path: str) -> list[str]:
+        """Every source id pointing at this file, oldest first.
+
+        More than one is not hypothetical — it is what this code produced for
+        a year. See `source_exists_for_path` for why, and `notebook` for what
+        is now done about the extras.
+        """
+        found: list[tuple[str, str]] = []
+        for item in self.iter_sources():
+            if self._points_at(item, container_path):
+                found.append((str(item.get("created") or ""), str(item.get("id") or "")))
+        found.sort()
+        return [sid for _created, sid in found if sid]
+
     def source_exists_for_path(self, container_path: str) -> str | None:
         """Find an existing source already pointing at this file, if any.
 
-        Guards against double-adding when a stage is retried. The path is not
-        returned in a clean field: Open Notebook reports it inside `asset` as a
-        *stringified Python dict* — the literal text
-        `{'file_path': '/app/data/uploads/library/…'}` — so an equality check
-        against the path never matches and every retry silently creates
-        another copy of the book. Match on containment, and handle the case
-        where it is a real dict.
+        Guards against double-adding when a stage is retried, which makes the
+        completeness of the search the whole point of the function. It used to
+        read one unparameterised `GET /api/sources`, and that endpoint
+        paginates silently: 50 rows, newest first, with nothing in the body
+        saying there are more. So the guard only ever saw the 50 most recently
+        touched sources, every book outside that window was judged absent, and
+        the stage added it again — which made *that* source the newest and
+        pushed another book out of the window. It compounds: this library went
+        from 78 sources in a day to 331 to 4,169, ending at 4,665 sources for
+        394 real files, one book added 174 times, each re-embedded.
+
+        `verify` read the same helper, so those books also reported "no source
+        for this file", sat through three forced rescans each and parked as
+        failures — 104 of the 105 books on the operator's panel.
+
+        Walking every page fixes the correctness. It does not make this cheap,
+        so callers that know the id they created should use `source_exists`.
         """
-        data = self.json("GET", "/api/sources", "list sources", headers=self._auth())
-        items = data if isinstance(data, list) else (data or {}).get("sources", [])
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            for key in ("file_path", "path", "asset", "url"):
-                value = item.get(key)
-                if not value:
-                    continue
-                if isinstance(value, dict):
-                    if str(value.get("file_path") or "") == container_path:
-                        return str(item.get("id") or "")
-                elif container_path in str(value):
-                    return str(item.get("id") or "")
-        return None
+        ids = self.sources_for_path(container_path)
+        return ids[0] if ids else None
 
     def health(self) -> str:
         data = self.json("GET", "/api/config", "health check")

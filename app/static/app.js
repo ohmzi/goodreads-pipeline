@@ -734,6 +734,12 @@ function renderIssuePreview() {
          * point of a stuck breaker is that nothing can prove it did. */
         ? `<button class="tiny" onclick="clearBreaker('${escapeHtml(canonicalService(g.service))}', this)">Clear hold</button>
            <a class="btn tiny" href="#/service/${encodeURIComponent(canonicalService(g.service))}">Open</a>`
+        : g.blocked_by
+        /* Retrying these cannot outrun the breaker holding the service they
+         * depend on, so the button that would only re-queue them into the
+         * same wait is replaced with a link to the thing actually blocking
+         * them — the `fix` text above already says which. */
+        ? `<a class="btn tiny" href="#/service/${encodeURIComponent(g.blocked_by)}">Open ${escapeHtml(labelForService(g.blocked_by))}</a>`
         : g.service
         ? `<a class="btn tiny" href="#/service/${encodeURIComponent(canonicalService(g.service))}">Open</a>`
         : `<button class="tiny" onclick="retryGroup('${escapeHtml(g.stage)}')">Retry all</button>`}</div>

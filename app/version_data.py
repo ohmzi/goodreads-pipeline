@@ -8,6 +8,39 @@ from __future__ import annotations
 
 VERSION_HISTORY: list[dict] = [
     {
+        "version": "1.3",
+        "date": "2026-09-21",
+        "summary": (
+            "A title-matching bug and an Open Notebook duplicate-source bug, "
+            "both of which misreported working books as failed, plus an "
+            "issues panel that stops retrying into a held service."
+        ),
+        "sections": [
+            {
+                "heading": "Verification",
+                "items": [
+                    "Title matching also compares a service's whole name against the wanted title, not only the part left after stripping everything from the first dash. Kavita and BookLore often name a book after the Author - Title folder it sits in, and the old form reduced that to the author's name alone, verifying present books as absent.",
+                    "A book still missing after the rescan budget is reported as notfound, not server: every service that reaches this point searched and answered \"no match,\" which the breaker no longer counts as a transient failure and the panel no longer tells you to retry.",
+                    "Verify and notebook ask Open Notebook about the source id they already recorded before falling back to a path search.",
+                ],
+            },
+            {
+                "heading": "Open Notebook",
+                "items": [
+                    "GET /api/sources paginates silently at 50 rows with no total and no next-page marker. The \"has this book already been added?\" check read only that one page, so a library past 50 sources added the same book again on every run. The check now walks every page, and repair --apply finds and removes what the bug already produced.",
+                ],
+            },
+            {
+                "heading": "Issues panel",
+                "items": [
+                    "A held service's row reads out any resume time the upstream stated in its own error text, instead of only \"these resume on their own.\"",
+                    "A failure group whose service is currently held no longer offers Retry all, since retrying cannot get further than the hold it is already in; it stays on the panel with a link to what is blocking it instead.",
+                    "Two Shelfmark failure messages that embed the book's own title no longer split into one row per book.",
+                ],
+            },
+        ],
+    },
+    {
         "version": "1.2",
         "date": "2026-09-21",
         "summary": (

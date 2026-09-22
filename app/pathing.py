@@ -77,6 +77,13 @@ def _normalise(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _stripped(text: str) -> str:
+    """Lowercased, with series and edition suffixes removed."""
+    text = (text or "").lower()
+    text = re.sub(r"\(.*?\)|\[.*?\]", " ", text)      # series / edition suffixes
+    return text
+
+
 def title_key(text: str) -> str:
     """A comparable form of a title, for cross-service matching.
 
@@ -85,10 +92,34 @@ def title_key(text: str) -> str:
     before the colon where Goodreads has none. Stripping punctuation and
     subtitle suffixes gives a form that compares equal.
     """
-    text = (text or "").lower()
-    text = re.sub(r"\(.*?\)|\[.*?\]", " ", text)      # series / edition suffixes
-    text = re.sub(r"\s*[:–—-]\s.*$", "", text)        # subtitles
+    text = re.sub(r"\s*[:–—-]\s.*$", "", _stripped(text))   # subtitles
     return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def title_keys(text: str) -> list[str]:
+    """Every form of `text` worth comparing, longest first.
+
+    `title_key` alone is not enough because it cannot tell a subtitle from an
+    author. It strips from the first " - " onwards, and the library's own
+    folder convention is `Author - Title` (`book_folder_name`), which the
+    indexers then adopt as the name of the thing they hold: Kavita calls the
+    Alamut folder the series "Bartol, Vladimir - Alamut", and BookLore stores
+    "Wladimir Bartol, Atilla Dirim - Alamut". Reduced by `title_key` those
+    become "bartol vladimir" — the author survives and the title, the one part
+    being compared, is thrown away. Every such book verified as absent while
+    sitting in all three services, which is how books this app placed itself
+    became books it could not find.
+
+    So the whole string is kept as a candidate form too. That is not a
+    loosening: `titles_match` still requires the *entire* wanted title to
+    appear word-bounded, so "less" does not match "21 Lessons for the 21st
+    Century" any more than it did before — "lessons" has no boundary after
+    "less". What it adds is that the wanted title is now allowed to be found
+    past a dash, which is exactly where an author prefix leaves it.
+    """
+    full = re.sub(r"[^a-z0-9]+", " ", _stripped(text)).strip()
+    short = title_key(text)
+    return [form for form in dict.fromkeys((full, short)) if form]
 
 
 _LEADING_ARTICLE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
@@ -110,18 +141,28 @@ def titles_match(candidate: str, want: str) -> bool:
     Still not a substring test: normalised "less" appears inside
     "21 lessons for the 21st century", which would let a genuinely absent book
     pass.
+
+    Both sides are compared in every form `title_keys` produces, because a
+    service is free to name a book after the `Author - Title` folder it found
+    it in and `title_key` alone reads that author as the whole title. The
+    word-boundary rule below is what keeps the extra form safe: the entire
+    wanted title still has to appear as whole words.
     """
-    a, b = title_key(candidate), title_key(want)
-    if not a or not b:
+    lefts = title_keys(candidate)
+    rights = title_keys(want)
+    if not lefts or not rights:
         return False
 
-    for left, right in ((a, b), (_without_article(a), _without_article(b))):
-        if not left or not right:
-            continue
-        if left == right:
-            return True
-        if re.search(rf"\b{re.escape(right)}\b", left):
-            return True
+    for left in lefts:
+        for right in rights:
+            for one, two in ((left, right),
+                             (_without_article(left), _without_article(right))):
+                if not one or not two:
+                    continue
+                if one == two:
+                    return True
+                if re.search(rf"\b{re.escape(two)}\b", one):
+                    return True
     return False
 
 

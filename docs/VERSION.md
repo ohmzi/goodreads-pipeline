@@ -7,6 +7,42 @@ a shelved, indexed library — Shelfmark, classify, place, index, notebook, shel
 Newest version first. Each release gets a section in the same shape as v1.0
 below: a date line, then one-line bullets under area headings.
 
+## v1.3
+
+2026-09-21
+
+### Verification
+
+- Title matching also compares a service's whole name against the wanted
+  title, not only the part left after stripping everything from the first
+  dash. Kavita and BookLore often name a book after the `Author - Title`
+  folder it sits in, and the old form reduced that to the author's name
+  alone, verifying present books as absent.
+- A book still missing after the rescan budget is reported as `notfound`, not
+  `server`: every service that reaches this point searched and answered "no
+  match," which the breaker no longer counts as a transient failure and the
+  panel no longer tells you to retry.
+- Verify and notebook ask Open Notebook about the source id they already
+  recorded before falling back to a path search.
+
+### Open Notebook
+
+- `GET /api/sources` paginates silently at 50 rows with no total and no
+  next-page marker. The "has this book already been added?" check read only
+  that one page, so a library past 50 sources added the same book again on
+  every run. The check now walks every page, and `repair --apply` finds and
+  removes what the bug already produced.
+
+### Issues panel
+
+- A held service's row reads out any resume time the upstream stated in its
+  own error text, instead of only "these resume on their own."
+- A failure group whose service is currently held no longer offers Retry
+  all, since retrying cannot get further than the hold it is already in; it
+  stays on the panel with a link to what is blocking it instead.
+- Two Shelfmark failure messages that embed the book's own title no longer
+  split into one row per book.
+
 ## v1.2
 
 2026-09-21
@@ -215,6 +251,8 @@ below: a date line, then one-line bullets under area headings.
 
 | Version | Date | Summary |
 |---|---|---|
+| v1.3 | 2026-09-21 | A title-matching bug and an Open Notebook duplicate-source bug, both of which misreported working books as failed, plus an issues panel that stops retrying into a held service. |
+| v1.2 | 2026-09-21 | A native-app-style mobile header with an animated search, a cohesive desktop header, and a stolen-focus fix. |
 | v1.1 | 2026-09-20 | Goodreads-faithful redesign: sign-in page rebuilt, white page chrome with a footer, structured version page, a narrow-screen header, and keyboard focus states. |
 | v1.0 | 2026-09-20 | Initial release. Goodreads to-read shelf to a shelved, indexed library, one file per book, no copies. |
 
@@ -226,7 +264,7 @@ below: a date line, then one-line bullets under area headings.
    no paragraphs.
 2. Add a row to the top of the **Version history** table with the version, the
    date, and a one-line summary of what that release changed.
-3. Bump `__version__` in `app/__init__.py`, currently `1.1.0`. It is the only
+3. Bump `__version__` in `app/__init__.py`, currently `1.3.0`. It is the only
    version literal: `FastAPI(version=__version__)`, `/api/version` and
    `/api/state` all read it, and `asset_version` is a short hash of `app.js`
    and `app.css` that changes on its own whenever either file changes. Then add
