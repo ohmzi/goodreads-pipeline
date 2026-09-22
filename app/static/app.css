@@ -1934,15 +1934,16 @@ a[target="_blank"]:active {
 }
 /* ============================================================ breakpoints
  *
- * Every @media block in the file, and nothing else — all five breakpoints live
+ * Every @media block in the file, and nothing else — all six breakpoints live
  * here in one place, min-width ones ascending then max-width ones descending,
  * which is the order the cascade needs:
  *
  *   1040px  the header search widens to 190px       ref §4 .searchBox__input--library
  *   1200px  nav padding tightens 30px → 15px        ref §3 .siteHeader__topLevelLink
  *   1220px  the header locks to its 1220px box      ref §3 .siteHeader__contents
+ *   ≤1015px the header becomes the phone header
  *   ≤1000px the 300px rail drops below the main column
- *   ≤780px  the header wraps and grid rows collapse to one column
+ *   ≤780px  the grid rows collapse to one column
  *
  * plus the one non-width query in the file, at the very bottom: the pressed
  * state's 1px depression, which is motion and is therefore refused when the
@@ -2018,7 +2019,22 @@ a[target="_blank"]:active {
   .svc-row { grid-template-columns: 9px minmax(0, 14em) minmax(0, max-content); }
 }
 
-/* ====================================================== max-width: 780px */
+/* ===================================================== max-width: 1015px */
+/* 1015 is measured, not chosen: laid out flat, this header's own contents —
+   wordmark, five nav links at their base 30px padding, the 155px search box,
+   the health pill and Sign out — need 1016px, and at 1015 they start pushing
+   the document wider than the viewport. It used to collapse at 780px, which
+   left every width from 781 to 1015 with a navbar that did not fit: the page
+   itself went 1016px wide and scrolled sideways, 165px of it on a phone held
+   in landscape (851x393). That is what made landscape look stretched — not the
+   type size, the whole document being wider than the screen.
+   Being content-derived, it moves if a nav label does; `measure.py` in the
+   preview harness prints the number. index.html has said "only shown under
+   1000px" about .search-toggle since it was written, so collapsing here is the
+   intent catching up with the markup rather than a new one.
+   A phone in landscape lands in this band and now gets the same header it gets
+   in portrait, which is what was asked for: the vertical layout, stretched. */
+
 /* The header at phone width, after their own native app rather than their
    desktop navbar: a bare search icon at the left, the wordmark truly
    centred, and .menu-toggle standing in for their avatar as the one
@@ -2029,7 +2045,7 @@ a[target="_blank"]:active {
    put the wordmark straddling both rows, and the account dropdown
    overlapping the nav strip below it, in the first cut of this. A grid
    column centres on its own track no matter what row two is doing. */
-@media (max-width: 780px) {
+@media (max-width: 1015px) {
   .bar-inner {
     display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
     height: auto; padding: 8px 12px; column-gap: 4px; row-gap: 4px;
@@ -2170,6 +2186,15 @@ a[target="_blank"]:active {
   .bar.menu-open .acct-panel .health-pill:hover { background: none; color: var(--teal); }
   .bar.menu-open .acct-panel .nav-link:hover { background: none; text-decoration: underline; }
 
+}
+
+/* ====================================================== max-width: 780px */
+/* The content grids, which collapse at a genuinely narrow width rather than at
+   the one the header above needs. Kept separate from that block deliberately:
+   a 900px-wide window has room for these rows and not for the desktop navbar,
+   and before the split it got neither — it kept the rows *and* the navbar, and
+   the navbar did not fit. */
+@media (max-width: 780px) {
   .page { padding: 12px; }
 
   /* The footer's two rows collapse independently: nav to one column (three
