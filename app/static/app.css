@@ -1093,6 +1093,42 @@ a.chip.svc-tag:active {
    carry the meaning on its own, not a frozen remnant of the motion path. */
 @keyframes state-spin { to { transform: rotate(360deg); } }
 
+/* ====================================================== the boot skeleton */
+/* What the app shows before app.js exists. It reuses .tiles/.tile/.panel/.body
+   rather than redrawing them, so the boxes are the real boxes — same grid,
+   same 1px #d8d8d8, same 4px, same behaviour at every breakpoint — and the
+   only thing added here is what goes *inside* them.
+   Why a skeleton and not the spinner: on first paint there is nothing else on
+   screen, so a spinner is a small mark on a large void and says only "wait".
+   The shape says what is coming and puts the tiles under the eye before the
+   numbers arrive, so the swap is a fill rather than a jump. */
+.sk {
+  display: block; border-radius: 3px;
+  /* --line, the app's most-used border, used here as a fill. Cream was the
+     first choice and was wrong: at 1.13:1 against white it was barely on the
+     page at all, and it disappeared entirely where a bar sits on the panel
+     heading's own cream band. --line holds 1.43:1 on white and differs in hue
+     as well as value from that band, so a bar reads as a bar in both places. */
+  background: var(--line);
+}
+.sk-tile { display: block; }               /* .tile is a <button> rule; this is a div */
+.sk-n    { width: 52px; height: 22px; }    /* stands in for the 24px numeral */
+.sk-k    { width: 76%; height: 9px; margin-top: 8px; }   /* ...and the 12px label */
+.sk-head { width: 132px; height: 9px; }    /* the panel's own 12px uppercase h2 */
+
+/* Three rows under the heading, at descending widths: a block of identical
+   bars reads as a pattern, and a pattern reads as decoration rather than as
+   content that has not arrived yet. */
+.sk-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; }
+.sk-row + .sk-row { border-top: 1px solid var(--line-soft); }
+.sk-a { width: 30%; height: 10px; flex: none; }
+.sk-b { width: 52%; height: 10px; }
+.sk-row:nth-child(2) .sk-b { width: 64%; }
+.sk-row:nth-child(3) .sk-b { width: 41%; }
+
+@keyframes sk-sheen { to { background-position: -200% 0; } }
+@keyframes boot-in  { to { opacity: 1; } }
+
 /* =============================================================== alerts */
 /* The two real .flashNotification surfaces plus the gold .gr-errorMessage box.
    Their old app-invented tints are gone; every pair below is in the ledger. */
@@ -2348,6 +2384,26 @@ a[target="_blank"]:active {
   .chip.svc-tag:active, .sidebar-version:active {
     transform: translateY(1px);
   }
+  /* The skeleton's sheen, and the reason the boot block waits a moment before
+     it appears at all.
+     The wait is the point: most loads finish inside a couple of hundred
+     milliseconds, and a skeleton that flashes up and vanishes is worse than
+     no skeleton — it reads as a glitch. Held at opacity 0 for 250ms, so a
+     fast load shows nothing and a slow one fades in once it is clear there is
+     something to wait for.
+     Both live in this query because both are motion. A viewer who asked for
+     less gets the skeleton immediately and flat: still the right shape, still
+     says the same thing, just without the sheen or the wait — and a flat
+     skeleton is legible on its own, which is the test the press and the
+     spinner are both held to. */
+  .boot { opacity: 0; animation: boot-in .18s ease .25s forwards; }
+  .sk {
+    background: linear-gradient(90deg,
+      var(--line) 25%, var(--line-soft) 37%, var(--line) 63%);
+    background-size: 200% 100%;
+    animation: sk-sheen 1.5s linear infinite;
+  }
+
   /* The loading spinner, declared here and nowhere else — see "state blocks".
      A viewer who has asked for less motion gets no ring at all rather than a
      frozen one, and reads the word beside it instead. 16px and 2px so it sits

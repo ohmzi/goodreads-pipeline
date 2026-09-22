@@ -53,10 +53,38 @@
   <div class="page" id="page">
     <main class="col" id="main">
       <div id="banner"></div>
-      <!-- Same shape stateBlock() emits, span and all, so the boot state and
-           every later loading state are the one styled thing rather than two
-           that happen to look alike. -->
-      <div id="view"><div class="state loading" role="status"><span>Loading…</span></div></div>
+      <!-- The first paint, and the only one that happens before app.js exists.
+           It is the dashboard's own shape rather than a spinner on a blank
+           page: .tiles, .tile, .panel and .body are the real classes, so this
+           inherits the real grid, borders, radii and breakpoints and cannot
+           drift from the thing it is standing in for. When the data lands the
+           tiles are already where the eye is looking.
+           A route change shows stateBlock('loading') instead — a spinner is
+           right there, where the header and nav are already on screen and only
+           the column below them is changing. -->
+      <div id="view">
+        <div class="boot" role="status">
+          <span class="sr-only">Loading…</span>
+          <div class="tiles" aria-hidden="true">
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+          </div>
+          <section class="panel" aria-hidden="true">
+            <h2><span class="sk sk-head"></span></h2>
+            <div class="body">
+              <div class="sk-row"><span class="sk sk-a"></span><span class="sk sk-b"></span></div>
+              <div class="sk-row"><span class="sk sk-a"></span><span class="sk sk-b"></span></div>
+              <div class="sk-row"><span class="sk sk-a"></span><span class="sk sk-b"></span></div>
+            </div>
+          </section>
+        </div>
+      </div>
     </main>
     <aside class="rail" id="rail" aria-label="Service status and run control"></aside>
   </div>
