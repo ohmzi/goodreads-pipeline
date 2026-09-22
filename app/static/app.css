@@ -1237,6 +1237,38 @@ a.chip.svc-tag:active {
 .sk-meta   { width: 30%; height: 9px; margin: 8px 0 0; }
 .sk-dots   { width: 96px; height: 9px; margin-top: 2px; }
 
+/* Genres: the category table's own 150px / 1fr / 1fr / 54px tracks, and the
+   note that sits on its own line to the right of the pill strip. */
+.sk-note   { display: inline-block; width: 300px; height: 9px; margin: 3px 0; }
+/* A genre pill is one short word plus a count, not My Books' phrases. These
+   have to out-specify the .sk-pillbtn:nth-child() widths above, which are My
+   Books' and otherwise win on the same strip and wrapped it to two rows.
+   Widths are the real pills', measured. */
+.filters .sk-pillbtn.sk-cat { width: 92px; }
+.filters .sk-pillbtn.sk-cat:nth-child(1)  { width: 75px; }
+.filters .sk-pillbtn.sk-cat:nth-child(2)  { width: 98px; }
+.filters .sk-pillbtn.sk-cat:nth-child(3)  { width: 95px; }
+.filters .sk-pillbtn.sk-cat:nth-child(4)  { width: 97px; }
+.filters .sk-pillbtn.sk-cat:nth-child(5)  { width: 84px; }
+.filters .sk-pillbtn.sk-cat:nth-child(6)  { width: 84px; }
+.filters .sk-pillbtn.sk-cat:nth-child(7)  { width: 87px; }
+.filters .sk-pillbtn.sk-cat:nth-child(8)  { width: 105px; }
+.filters .sk-pillbtn.sk-cat:nth-child(9)  { width: 78px; }
+.filters .sk-pillbtn.sk-cat:nth-child(10) { width: 105px; }
+.filters .sk-pillbtn.sk-cat:nth-child(11) { width: 123px; }
+/* inline-block so each bar sits in its cell's own 18px line box. As blocks
+   inside the real `<span data-k>` wrappers they generated anonymous boxes
+   instead, which made the row 10px short on desktop and 39px tall on a phone,
+   where those wrappers also carry the column name in a ::before. */
+.sk-c1, .sk-c2, .sk-c3, .sk-c4 { display: inline-block; vertical-align: middle; }
+.sk-c1     { width: 82px;  height: 10px; }
+.sk-c2     { width: 88%;   height: 10px; }
+.sk-c3     { width: 56%;   height: 10px; }
+.sk-c4     { width: 22px;  height: 10px; }
+.cat-row:nth-child(even) .sk-c2 { width: 72%; }
+.cat-row:nth-child(3n)   .sk-c1 { width: 62px; }
+.cat-row:nth-child(3n)   .sk-c3 { width: 44%; }
+
 /* =============================================================== alerts */
 /* The two real .flashNotification surfaces plus the gold .gr-errorMessage box.
    Their old app-invented tints are gone; every pair below is in the ledger. */

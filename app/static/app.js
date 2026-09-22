@@ -98,6 +98,31 @@ function skeletonFor(name) {
       </div></div>
       <div class="panel">${skBookRows(8)}</div></div>`;
   }
+  if (name === 'genres') {
+    return `<div class="boot" role="status"><span class="sr-only">Loading…</span>
+      ${skHead('190px')}
+      <div class="toolbar"><div class="filters">
+        ${skRepeat(11, sk('sk-pillbtn sk-cat'))}
+      </div><span class="grow"></span>
+      <span class="faint small toolbar-note">${sk('sk-note')}</span></div>
+      <div class="panel">
+        <h2>${sk('sk-head')}</h2>
+        <div class="cat-table">
+          <div class="cat-row head">${sk('sk-c1')}${sk('sk-c2')}${sk('sk-c3')}${sk('sk-c4')}</div>
+          ${skRepeat(9, `<div class="cat-row">
+            <span data-k="Category">${sk('sk-c1')}</span>
+            <span data-k="Folder">${sk('sk-c2')}</span>
+            <span data-k="Notebook">${sk('sk-c3')}</span>
+            <span data-k="Books">${sk('sk-c4')}</span>
+          </div>`)}
+        </div>
+      </div>
+      <div class="panel">
+        <h2>${sk('sk-head')}<span class="grow"></span>${sk('sk-head short')}</h2>
+        <div class="body tight panel-meta">${sk('sk-note')}</div>
+        ${skBookRows(6)}
+      </div></div>`;
+  }
   return '';
 }
 
