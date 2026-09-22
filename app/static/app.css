@@ -1113,7 +1113,8 @@ a.chip.svc-tag:active {
 }
 .sk-tile { display: block; }               /* .tile is a <button> rule; this is a div */
 .sk-n    { width: 52px; height: 22px; }    /* stands in for the 24px numeral */
-.sk-k    { width: 76%; height: 9px; margin-top: 8px; }   /* ...and the 12px label */
+.sk-k    { width: 76%; height: 9px; margin-top: 3px; }   /* ...and the 12px label, */
+.sk-k2   { width: 52%; height: 9px; margin-top: 5px; }   /* which wraps to two lines */
 .sk-head { width: 132px; height: 9px; }    /* the panel's own 12px uppercase h2 */
 .sk-head.short { width: 96px; }
 .sk-btn  { width: 66px; height: 18px; border-radius: var(--radius); }
@@ -1130,8 +1131,9 @@ a.chip.svc-tag:active {
    two-line italic explanation under it, so two bars stood at about half the
    height these rows actually land at and the panel came up visibly short. */
 .sk-l1   { width: 88%; height: 10px; }
-.sk-l2   { width: 96%; height: 10px; margin-top: 7px; }
-.sk-l3   { width: 54%; height: 10px; margin-top: 7px; }
+.sk-l2   { width: 96%; height: 10px; margin-top: 11px; }
+.sk-l3   { width: 91%; height: 10px; margin-top: 11px; }
+.sk-l4   { width: 54%; height: 10px; margin-top: 11px; }
 .stage-row:nth-child(3) .sk-l1 { width: 72%; }
 .stage-row:nth-child(3) .sk-l3 { width: 41%; }
 .stage-row:nth-child(4) .sk-l1 { width: 94%; }
@@ -1143,14 +1145,28 @@ a.chip.svc-tag:active {
 /* The one header item that is genuinely unknown on first paint: how many
    services are healthy. The five nav labels are fixed and are rendered as the
    real links in index.html, so only the count needs standing in for. */
-.sk-pill { width: 104px; height: 11px; }
+.sk-pill { width: 139px; height: 11px; }
 
-/* The log's own three tracks: 104px stamp, 110px service, then the line. */
-.sk-t { width: 82px;  height: 9px; }
-.sk-s { width: 70%;   height: 9px; }
-.sk-m { width: 86%;   height: 9px; }
-.ev:nth-child(2) .sk-m { width: 64%; }
-.ev:nth-child(3) .sk-m { width: 92%; }
+/* The log's own three tracks: 104px stamp, 110px service, then the line. The
+   4px margins are not decoration — they stand the bar up in the 18px line box
+   the 12px mono text occupies, so a one-line entry is the 33px a real one is
+   rather than 24px. A long path wraps to three lines there, which is why the
+   middle entry carries three bars and comes out at the same 69px. */
+.sk-t { width: 82px;  height: 10px; margin: 4px 0; }
+.sk-s { width: 70%;   height: 10px; margin: 4px 0; }
+.sk-m { width: 86%;   height: 10px; margin: 4px 0; }
+/* .ev is a three-column grid, so the extra bars of a wrapped entry would
+   auto-place into columns 1 and 2 of a new row rather than stacking under the
+   message. Pinned to column 3, they stack, and the entry comes out at the 69px
+   a three-line one really is. */
+.ev .sk-m:nth-child(n+4) { grid-column: 3; }
+/* ...and with the row-gap zeroed, because the real entry's extra lines are
+   line boxes inside one cell, not grid rows with 10px between them. */
+.boot .log .ev { row-gap: 0; }   /* beats `.log .ev`'s own gap, which is declared later */
+.ev:nth-child(2) .sk-m:nth-child(3) { width: 97%; }
+.ev:nth-child(2) .sk-m:nth-child(4) { width: 92%; }
+.ev:nth-child(2) .sk-m:nth-child(5) { width: 68%; }
+.ev:nth-child(3) .sk-m { width: 58%; }
 
 /* The rail: seven service rows on the real 9px/1fr/max-content tracks, the run
    control card, and the version pill. Without these the skeleton was a narrow
