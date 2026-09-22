@@ -1238,8 +1238,12 @@ a.chip.svc-tag:active {
 .sk-dots   { width: 96px; height: 9px; margin-top: 2px; }
 
 /* Genres: the category table's own 150px / 1fr / 1fr / 54px tracks, and the
-   note that sits on its own line to the right of the pill strip. */
-.sk-note   { display: inline-block; width: 300px; height: 9px; margin: 3px 0; }
+   note that sits on its own line to the right of the pill strip. Scoped to the
+   two surfaces that carry a sentence: declared bare, it was later in the file
+   than the rail's own .sk-note and silently widened all seven rail rows from
+   46px to 300px, squeezing the service names beside them. */
+.toolbar-note .sk-note,
+.panel-meta .sk-note { display: inline-block; width: 300px; margin: 3px 0; }
 /* A genre pill is one short word plus a count, not My Books' phrases. These
    have to out-specify the .sk-pillbtn:nth-child() widths above, which are My
    Books' and otherwise win on the same strip and wrapped it to two rows.
