@@ -2,17 +2,19 @@
 
 # 📚 Goodreads-Pipeline
 
-**Watches a Goodreads _to-read_ shelf and carries each new book all the way to a
-shelved, indexed library — without ever making a second copy of a file.**
+**Watches your Goodreads _to-read_ shelf, downloads each book, then places it
+into Kavita, BookLore, Grimmory and Audiobookshelf and adds it to Open Notebook
+— ready to read, listen to, and take notes on. One container, and it never
+makes a second copy of a file.**
 
-[![Version](https://img.shields.io/badge/version-1.3.0-382110?style=for-the-badge)](docs/VERSION.md)
+[![Version](https://img.shields.io/badge/version-1.4.0-382110?style=for-the-badge)](docs/VERSION.md)
 [![License](https://img.shields.io/badge/license-Apache--2.0-00635d?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)](requirements.txt)
 [![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
 [![Docker](https://img.shields.io/badge/Docker-2CA5E0?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
 [![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](docs/ARCHITECTURE.md)
 
-Self-hosted · single-operator · one container
+Self-hosted · single-operator · no build step
 
 </div>
 
@@ -150,14 +152,26 @@ chmod 600 .env
 docker compose up -d --build
 ```
 
-**Set `PUBLISH_HOST` in `.env` before you start.** Left unset, the port is
-published on every interface, and a published port is *not* covered by ufw —
-docker's iptables rules are evaluated before the firewall's. Point it at a VPN
-interface, one LAN address, or `127.0.0.1` behind a proxy:
+Left unset, `8091` is published on every interface, and a published port is
+*not* covered by ufw — docker's iptables rules are evaluated before the
+firewall's. It is worth narrowing with `PUBLISH_HOST` in `.env`, and **easy to
+get wrong in a way that takes the app offline**: a binding to one address
+answers only on that address, so a value your front end does not dial means
+every request is refused with nothing in the app's logs at all.
 
+Confirm where your front end reaches you from first:
+
+```bash
+docker compose logs goodreads | grep 'GET /login'
 ```
-PUBLISH_HOST=127.0.0.1
-```
+
+and note that a proxy or tunnel running in a **container** dials you as its
+bridge gateway (`172.x.0.1`), never as `127.0.0.1` — so `127.0.0.1` suits only a
+proxy running directly on the host. `0.0.0.0` (the default) is always safe.
+
+This decides which of the host's addresses the port answers on. It does **not**
+decide whether the app is reachable from the internet: a tunnel in front reaches
+it whichever value is set. See [SECURITY.md](docs/SECURITY.md).
 
 Create a login, then open `http://<host>:8091`:
 
@@ -181,10 +195,13 @@ python -m app.cli audit             # duplicate audiobooks and titles in two pla
 python -m app.cli rename            # tidy loose audiobooks into Author/Title
 python -m app.cli reclassify        # re-run classification over the library
 python -m app.cli backfill-genres   # re-resolve genres and re-categorise
+python -m app.cli forget-session    # drop the stored Goodreads session + browser profile
 ```
 
 `report` and `audit` are read-only. `repair`, `rename`, `reconcile` and
-`reclassify` change nothing without `--apply`.
+`reclassify` change nothing without `--apply`. Two write immediately:
+`backfill-genres`, and `forget-session`, which deletes the stored Goodreads
+session and the browser profile and refuses while a login browser is running.
 
 ---
 
@@ -208,8 +225,10 @@ bodies, and withhold error bodies from anything that carried a credential.
 
 The noVNC desktop has no published port: x11vnc binds to loopback inside the
 container and the app bridges to it over a WebSocket that checks both the
-origin and the session, leaving the one published port as the only way in —
-which is why `PUBLISH_HOST` matters.
+origin and the session. That leaves the one published port as the only way in,
+so the sign-in page is what stands in front of everything. `PUBLISH_HOST`
+decides which of the host's addresses that port answers on — it does not decide
+whether something in front can reach it.
 
 > ⚠️ The threat model, credential storage design, reverse-proxy deployment, and
 > an explicit list of known limits — including that the session cookie is a
@@ -258,7 +277,7 @@ eventually expires the UI says so and you do it again.
 |---|---|
 | 🚀 [SETUP.md](docs/SETUP.md) | Install, mounts and networks, first login, first run, bare-metal |
 | ⚙️ [CONFIGURATION.md](docs/CONFIGURATION.md) | Every variable, credential, and path mapping; `categories.yml`; genre resolution |
-| 🔐 [SECURITY.md](docs/SECURITY.md) | Threat model, credential storage, sessions, reverse proxy, known limits |
+| 🔐 [SECURITY.md](docs/SECURITY.md) | **What is enforced and where** (the whole posture on one page), threat model, credential storage, sessions, reverse proxy, known limits |
 | 🔧 [OPERATIONS.md](docs/OPERATIONS.md) | Upgrading, backup and restore, the maintenance CLI, health, troubleshooting |
 | 🏗️ [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, module map, the database, concurrency, the path namespace problem |
 | 🔄 [PIPELINE.md](docs/PIPELINE.md) | Every stage in detail, the scheduler, retries, the service breaker |
