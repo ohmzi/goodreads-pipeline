@@ -89,6 +89,25 @@ function skBookRows(n) {
     </div>`)}</div>`;
 }
 
+/* Put a route's skeleton on screen, shell and all.
+ *
+ * The shape of the view was never the whole job: the page it stands in for
+ * also has a column width, a tab lit in the header, and either a service rail
+ * or no rail at all. Setting only `#view` drew every non-dashboard skeleton
+ * into the dashboard's layout — a half-width column beside a rail that route
+ * does not have, under a header still saying Home — so the placeholder was a
+ * picture of a different page, and the real one jumped sideways on arrival.
+ *
+ * Returns false if the route has no skeleton, so the caller can fall back. */
+function showSkeleton(name) {
+  const shape = skeletonFor(name);
+  if (!shape) return false;
+  $('#page')?.classList.toggle('single', name !== 'dashboard');
+  renderNav();
+  setHtml($('#view'), shape);
+  return true;
+}
+
 function skeletonFor(name) {
   if (name === 'books') {
     return `<div class="boot" role="status"><span class="sr-only">Loading…</span>
@@ -445,22 +464,33 @@ function route() {
 function go(path) { window.location.hash = path; }
 
 /* --------------------------------------------------------------- shell */
-function renderMasthead() {
-  const { name } = route();
-  const nav = [
-    ['/', 'Home', 'dashboard'],
-    ['/books', 'My Books', 'books'],
-    ['/genres', 'Genres', 'genres'],
-    ['/services', 'Services', 'services'],
-    ['/activity', 'Activity', 'activity'],
-  ];
-  const health = state?.health;
-  const bad = health ? health.unhealthy.length : 0;
+const NAV = [
+  ['/', 'Home', 'dashboard'],
+  ['/books', 'My Books', 'books'],
+  ['/genres', 'Genres', 'genres'],
+  ['/services', 'Services', 'services'],
+  ['/activity', 'Activity', 'activity'],
+];
 
-  setHtml($('#nav'), nav.map(([href, label, key]) => {
+/* The one part of the masthead a skeleton can finish: the five labels are
+   fixed and the route is known before any data is. index.html ships Home lit
+   because "#/" is where you land, and until this was callable on its own a
+   deep link spent the entire first load with the wrong tab marked — the
+   skeleton for My Books under a header that said Home. Separate from the
+   health pill below, which has nothing to report yet and keeps its own bar. */
+function renderNav() {
+  const { name } = route();
+  setHtml($('#nav'), NAV.map(([href, label, key]) => {
     const on = name === key || (key === 'services' && name === 'service');
     return `<a href="#${href}"${on ? ' class="active" aria-current="page"' : ''}>${label}</a>`;
   }).join(''));
+}
+
+function renderMasthead() {
+  const health = state?.health;
+  const bad = health ? health.unhealthy.length : 0;
+
+  renderNav();
 
   // The always-visible answer to "is anything broken right now". Below 600px
   // only the dot and the count survive, so both have to carry the state.
@@ -2135,7 +2165,14 @@ async function render() {
   if (!state) {
     // The route's own shape, not a spinner: this is the first load, so there is
     // nothing else on screen to give the wait a context.
-    setHtml(view, skeletonFor(r.name) || stateBlock('loading', 'Loading…'));
+    //
+    // The shell has to be the route's own too. This branch used to return
+    // before the two lines below ever ran, so a first load of any route but
+    // the dashboard drew that route's skeleton into the dashboard's layout:
+    // a half-width column with the service rail still beside it, under a
+    // header with Home lit. The page it was standing in for is full width and
+    // has no rail, so the skeleton was a picture of a different page.
+    if (!showSkeleton(r.name)) setHtml(view, stateBlock('loading', 'Loading…'));
     return;
   }
 
@@ -2296,10 +2333,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // fetch starts — otherwise a refresh on #/books spends the whole load showing
   // a dashboard that is not coming.
   const first = route().name;
-  if (first !== 'dashboard') {
-    const shape = skeletonFor(first);
-    if (shape) setHtml($('#view'), shape);
-  }
+  if (first !== 'dashboard') showSkeleton(first);
   refresh();
   setInterval(() => refresh({ poll: true }), 6000);
   // A poll held back while a field had focus lands the moment focus leaves.
