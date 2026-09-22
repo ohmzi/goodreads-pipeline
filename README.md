@@ -12,7 +12,7 @@ shelved, indexed library — without ever making a second copy of a file.**
 [![Docker](https://img.shields.io/badge/Docker-2CA5E0?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
 [![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](docs/ARCHITECTURE.md)
 
-Self-hosted · single-operator · one container · not affiliated with Goodreads or Amazon
+Self-hosted · single-operator · one container
 
 </div>
 
