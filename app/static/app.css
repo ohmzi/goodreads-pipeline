@@ -1269,6 +1269,21 @@ a.chip.svc-tag:active {
 .cat-row:nth-child(3n)   .sk-c1 { width: 62px; }
 .cat-row:nth-child(3n)   .sk-c3 { width: 44%; }
 
+/* Services: a .svc card is a dot, a name, a status chip, one line of detail
+   and a quieter footer line. */
+.sk-svcname { display: inline-block; vertical-align: middle;
+              width: 96px; height: 11px; margin: 5px 0 5px 8px; }
+.sk-svcmeta { width: 62%; height: 10px; margin: 4px 0; }
+.sk-svcfoot { width: 44%; height: 9px; margin: 12px 0; }
+.svc:nth-child(even) .sk-svcname { width: 78px; }
+.svc:nth-child(3n)   .sk-svcmeta { width: 48%; }
+/* One line, because that paragraph is one line at any width the card grid is
+   readable at. p2-p4 are phone-only: the same sentence runs to four lines once
+   the column is 412px wide, which is 54px the desktop shape must not carry. */
+.sk-p1 { width: 94%; height: 10px; margin: 4px 0; }
+.sk-p2, .sk-p3, .sk-p4 { display: none; width: 90%; height: 10px; margin: 8px 0; }
+.sk-p4 { width: 52%; }
+
 /* =============================================================== alerts */
 /* The two real .flashNotification surfaces plus the gold .gr-errorMessage box.
    Their old app-invented tints are gone; every pair below is in the ledger. */
@@ -2466,6 +2481,7 @@ a[target="_blank"]:active {
      action stack instead of sitting side by side. */
   .stage-row { grid-template-columns: 1fr; gap: 5px; }
   .boot .sk-l5, .boot .sk-l6, .boot .sk-l7 { display: block; }
+  .boot .sk-p2, .boot .sk-p3, .boot .sk-p4 { display: block; }
   .boot .sk-l2, .boot .sk-l3, .boot .sk-l4 { margin-top: 9px; }
   .book-row { grid-template-columns: 44px minmax(0, 1fr); }
   .book-row .side { grid-column: 2; align-items: flex-start; }
