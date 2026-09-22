@@ -1037,6 +1037,62 @@ a.chip.svc-tag:active {
 .tile.err .n  { color: var(--err); }
 .tile.gold .n { color: var(--gold-ink); }
 
+/* ========================================================= state blocks */
+/* The three things `stateBlock()` emits — loading, empty, error — which until
+   now had no CSS at all. "Loading…" was a bare text node in the top-left of a
+   blank page, and it is the first thing the app shows on every boot and every
+   route change, so it was also the first impression the app made.
+   Thirteen call sites share this, and they sit in two very different places:
+   some fill the whole view (boot, a route change, a failed fetch), others are
+   nested inside a .panel (credentials loading, "nothing is waiting on Kavita").
+   So the block itself stays transparent and borderless — it inherits whatever
+   surface it lands on instead of drawing a second card inside a card — and
+   only the full-view case, scoped below by `#view >`, takes real height. */
+.state {
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; flex-wrap: wrap;
+  padding: 34px 20px;
+  font: 15px/22px var(--sans);
+  color: var(--muted);
+  text-align: center;
+}
+/* A measure, so a long error message wraps as a readable column rather than
+   running the full width of a 1220px shell. */
+.state > span { max-width: 46ch; }
+/* The error's own dot is emitted by stateBlock(); the text beside it stays
+   muted rather than going red — the dot is the state, and red prose at 15px
+   over a white page reads as shouting. The action button keeps its own ink. */
+.state.error > span { color: var(--ink-2); }
+
+/* Only a state that *is* the view gets height. Nested ones keep the compact
+   padding above, so "Loading credentials…" does not open a 46vh hole inside a
+   service panel. 46vh leaves the header, the footer and this comfortably on
+   one screen at 900px tall without pushing the footer off it. */
+#view > .state { min-height: 46vh; align-content: center; }
+
+/* ...and where the browser can tell, it takes the space that actually exists
+   instead of that fixed 46vh, which centred the spinner in its own box and
+   left a void beneath it down to the footer. `.page` is `align-items: start`
+   because a rail beside a short page must not stretch to match it — true for
+   every page except this one, where the column IS the page. So the override
+   is scoped by :has() to a view that holds nothing but a state block, and
+   wrapped in @supports so a browser without :has() keeps the 46vh above
+   rather than collapsing to no height at all. */
+@supports selector(:has(*)) {
+  .page:has(> .col > #view > .state) { align-items: stretch; }
+  .page:has(> .col > #view > .state) > .col { display: flex; flex-direction: column; }
+  #view:has(> .state) { display: flex; flex-direction: column; flex: 1; }
+  #view:has(> .state) > .state { flex: 1; min-height: 0; }
+}
+
+/* The spinner is declared only inside the reduced-motion query at the bottom
+   of this file, not here. A ring that cannot spin is not a quieter spinner, it
+   is a broken one — so a viewer who has asked for less motion gets no ring at
+   all and reads the word "Loading…", which says the same thing and says it
+   without moving. Same reasoning as "the press": the non-motion path has to
+   carry the meaning on its own, not a frozen remnant of the motion path. */
+@keyframes state-spin { to { transform: rotate(360deg); } }
+
 /* =============================================================== alerts */
 /* The two real .flashNotification surfaces plus the gold .gr-errorMessage box.
    Their old app-invented tints are gone; every pair below is in the ledger. */
@@ -2292,6 +2348,18 @@ a[target="_blank"]:active {
   .chip.svc-tag:active, .sidebar-version:active {
     transform: translateY(1px);
   }
+  /* The loading spinner, declared here and nowhere else — see "state blocks".
+     A viewer who has asked for less motion gets no ring at all rather than a
+     frozen one, and reads the word beside it instead. 16px and 2px so it sits
+     on the 22px line without becoming the loudest thing on an empty page. */
+  .state.loading::before {
+    content: ""; flex: none; width: 16px; height: 16px;
+    border: 2px solid var(--line);
+    border-top-color: var(--teal);
+    border-radius: 50%;
+    animation: state-spin .8s linear infinite;
+  }
+
   /* ...except the filter tabs, which are <button>s and are named in the list
      above as controls that must not move: a tab's 2px underline is drawn on its
      own bottom edge against the strip's 1px baseline, so 1px of travel opens a

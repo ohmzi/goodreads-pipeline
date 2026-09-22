@@ -53,7 +53,10 @@
   <div class="page" id="page">
     <main class="col" id="main">
       <div id="banner"></div>
-      <div id="view"><div class="state loading" role="status">Loading…</div></div>
+      <!-- Same shape stateBlock() emits, span and all, so the boot state and
+           every later loading state are the one styled thing rather than two
+           that happen to look alike. -->
+      <div id="view"><div class="state loading" role="status"><span>Loading…</span></div></div>
     </main>
     <aside class="rail" id="rail" aria-label="Service status and run control"></aside>
   </div>
