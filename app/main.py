@@ -339,7 +339,7 @@ def _asset_version() -> str:
     so it needs no build step and no one has to remember to bump it.
     """
     digest = hashlib.sha256()
-    for name in ("app.js", "app.css"):
+    for name in ("app.js", "app.css", "favicon.ico"):
         path = STATIC_DIR / name
         try:
             digest.update(path.read_bytes())
