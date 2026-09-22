@@ -143,6 +143,23 @@ function skeletonFor(name) {
         <div class="body">${sk('sk-p1')}</div>
       </div></div>`;
   }
+  if (name === 'activity') {
+    return `<div class="boot" role="status"><span class="sr-only">Loading…</span>
+      ${skHead('140px')}
+      <div class="panel">
+        <h2>${sk('sk-head short')}</h2>
+        <div class="body">
+          <div class="rail-actions">${sk('sk-btn')}${sk('sk-btn')}</div>
+          <div class="rail-check">${sk('sk-check')}${sk('sk-checklabel')}</div>
+          <p class="rail-note">${sk('sk-note')}</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="body flush log">
+          ${skRepeat(12, `<div class="ev">${sk('sk-t')}${sk('sk-s')}${sk('sk-m')}</div>`)}
+        </div>
+      </div></div>`;
+  }
   return '';
 }
 

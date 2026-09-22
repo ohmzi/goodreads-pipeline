@@ -1138,6 +1138,10 @@ a.chip.svc-tag:active {
    any column width. .wide is 50% of its container, which is right in the rail
    and absurd in a full-width panel head. */
 .sk-btn.act  { width: 104px; }
+/* ...and .act is equally wrong inside .rail-actions, whose real buttons carry
+   width:100% against a 1fr track. Mirrors that rule, and the 21px those 11px
+   buttons are actually tall. */
+.rail-actions .sk-btn { width: 100%; height: 21px; }
 
 /* The .stage-row tracks are 138px / 112px / 1fr / auto, and these fill them:
    a name over a count, the service chip, two lines of detail, an action. Widths
@@ -1291,6 +1295,24 @@ a.chip.svc-tag:active {
 .sk-p1 { width: 94%; height: 10px; margin: 4px 0; }
 .sk-p2, .sk-p3, .sk-p4 { display: none; width: 90%; height: 10px; margin: 8px 0; }
 .sk-p4 { width: 52%; }
+
+/* Activity: run control's two buttons, the auto-shelve checkbox and its label,
+   then the log. The log entries reuse .sk-t/.sk-s/.sk-m from the dashboard's
+   own activity panel, which is the same component. */
+/* .rail-check > span { flex: 1 } exists for the real label, which is text and
+   stops where the words stop. A bar does not: both children took half the row
+   and the checkbox rendered as a 581px slab. flex:none is what the real
+   <input> already does, for the same reason. The margins rebuild the 17px line
+   box the label text occupies, so the row keeps its real 29px height. */
+.rail-check > .sk { flex: none; }
+/* The real .rail-check is a <label>: pointer cursor, row highlight on hover,
+   a darker one on press. None of that is true of a placeholder, which is not
+   a target — same reason .boot-rail .svc-row drops its own cursor above. */
+.boot .rail-check { cursor: default; }
+.boot .rail-check:hover, .boot .rail-check:active { background: none; }
+.sk-check      { width: 13px; height: 13px; margin: 2px 0 0; border-radius: 3px; }
+.sk-checklabel { width: 226px; height: 10px; margin: 4px 0 3px; }
+.rail-note .sk-note { display: inline-block; vertical-align: middle; width: 167px; margin: 3px 0; }
 
 /* =============================================================== alerts */
 /* The two real .flashNotification surfaces plus the gold .gr-errorMessage box.
