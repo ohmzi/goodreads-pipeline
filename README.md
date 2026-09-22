@@ -1,6 +1,6 @@
 <div align="center">
 
-# 📚 goodreads
+# 📚 Goodreads-Pipeline
 
 **Watches a Goodreads _to-read_ shelf and carries each new book all the way to a
 shelved, indexed library — without ever making a second copy of a file.**
