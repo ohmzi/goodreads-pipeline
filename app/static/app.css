@@ -1149,7 +1149,7 @@ a.chip.svc-tag:active {
    rather than as a repeating pattern, which is what reads as decoration. */
 .sk-w1   { width: 62%; height: 11px; }
 .sk-w2   { width: 44%; height: 9px; margin-top: 6px; }
-.sk-chip { width: 74px; height: 17px; border-radius: var(--radius); }
+.sk-chip { width: 55px; height: 22px; border-radius: var(--radius); }
 /* Three lines, not two: a real row carries the detail sentence plus a
    two-line italic explanation under it, so two bars stood at about half the
    height these rows actually land at and the panel came up visibly short. */
@@ -1184,9 +1184,13 @@ a.chip.svc-tag:active {
    the 12px mono text occupies, so a one-line entry is the 33px a real one is
    rather than 24px. A long path wraps to three lines there, which is why the
    middle entry carries three bars and comes out at the same 69px. */
-.sk-t { width: 82px;  height: 10px; margin: 4px 0; }
-.sk-s { width: 70%;   height: 10px; margin: 4px 0; }
-.sk-m { width: 86%;   height: 10px; margin: 4px 0; }
+.sk-t { width: 104px; height: 10px; margin: 4px 0 1px; }
+.sk-s { width: 70%;   height: 10px; margin: 4px 0 1px; }
+/* On the Activity page the middle cell holds a service chip, which is 22px
+   and sets the row height; on the dashboard's narrower log it is a bar. */
+.boot .log .ev .sk-s { width: 110px; height: 22px; margin: 0;
+                       border-radius: var(--radius); }
+.sk-m { width: 86%;   height: 10px; margin: 4px 0 1px; }
 /* .ev is a three-column grid, so the extra bars of a wrapped entry would
    auto-place into columns 1 and 2 of a new row rather than stacking under the
    message. Pinned to column 3, they stack, and the entry comes out at the 69px
@@ -1230,20 +1234,38 @@ a.chip.svc-tag:active {
 /* Pill widths are each label's own width, because the strip wraps: too narrow
    and it fits on fewer rows than the real one does, which showed up as a
    45px-short toolbar on a phone rather than as anything visible on desktop. */
-.sk-pillbtn{ display: inline-block; width: 140px; height: 28px; border-radius: 999px; }
-.filters .sk-pillbtn:nth-child(2) { width: 155px; }
-.filters .sk-pillbtn:nth-child(3) { width: 100px; }
-.filters .sk-pillbtn:nth-child(4) { width: 125px; }
-.filters .sk-pillbtn:nth-child(5) { width: 110px; }
-.filters .sk-pillbtn:nth-child(6) { width: 120px; }
-.filters .sk-pillbtn:nth-child(7) { width: 80px; }
+/* 31px, which is what a .filters button measures — 28 left the strip 3px
+   short and every pill sitting slightly low against the one that replaced it.
+   The widths are the real labels', measured on the loaded page. */
+.sk-pillbtn{ display: inline-block; width: 137px; height: 31px; border-radius: 999px; }
+.filters .sk-pillbtn:nth-child(2) { width: 151px; }
+.filters .sk-pillbtn:nth-child(3) { width: 101px; }
+.filters .sk-pillbtn:nth-child(4) { width: 108px; }
+.filters .sk-pillbtn:nth-child(5) { width: 107px; }
+.filters .sk-pillbtn:nth-child(6) { width: 122px; }
+.filters .sk-pillbtn:nth-child(7) { width: 59px; }
 
 /* A book row is 52px cover / title block / status dots. */
 .sk-cover  { width: 52px; height: 78px; border-radius: 3px; }
 .sk-title  { width: 58%; height: 13px; margin: 5px 0 0; }
 .sk-byline { width: 44%; height: 10px; margin: 8px 0 0; }
-.sk-meta   { width: 30%; height: 9px; margin: 8px 0 0; }
-.sk-dots   { width: 96px; height: 9px; margin-top: 2px; }
+.sk-meta   { width: 30%; height: 9px; margin: 6px 0 0; }
+/* The blocker line and the side column, both measured off a real row. The
+   chips are chip-shaped rather than bars: they are filled pills on the page,
+   and a thin bar in their place made the row read as four lines of text. */
+.sk-bchip  { display: inline-block; vertical-align: top; width: 47px; height: 22px;
+             border-radius: var(--radius); }
+.sk-bsvc   { display: inline-block; vertical-align: top; width: 35px; height: 22px;
+             margin-left: 3px; border-radius: var(--radius); }
+/* inline-block so .msg keeps the 18px line box its own text occupies: as a
+   block the bar's margins collapsed through it and left the row 8px short. */
+.sk-bmsg   { display: inline-block; vertical-align: middle; width: 62%;
+             height: 10px; margin: 4px 0; }
+.book-row:nth-child(even) .sk-bmsg { width: 74%; }
+.book-row:nth-child(3n)   .sk-bmsg { width: 51%; }
+.sk-schip  { display: block; width: 46px; height: 22px; margin-left: auto;
+             border-radius: var(--radius); }
+.sk-cap    { width: 63px; height: 9px; margin: 5px 0 4px; }
 
 /* Genres: the category table's own 150px / 1fr / 1fr / 54px tracks, and the
    note that sits on its own line to the right of the pill strip. Scoped to the
@@ -1252,22 +1274,43 @@ a.chip.svc-tag:active {
    46px to 300px, squeezing the service names beside them. */
 .toolbar-note .sk-note,
 .panel-meta .sk-note { display: inline-block; width: 300px; margin: 3px 0; }
+/* The three blocks under the ALL BOOKS heading: a two-line note across the
+   band, then "Genres seen" and "Genres from", each a label with chips after
+   it. Without these the band was one 300px bar standing in for 114px of
+   content, and the panel below it started 80px too high. */
+/* inline-block, and wide enough to wrap: two blocks would collapse their
+   facing margins into one and leave the note 4px short of the two 19px lines
+   it stands for. The same reason .sk-n and .sk-k are inline-block above. */
+.sk-bn     { display: inline-block; vertical-align: middle; width: 97%;
+             height: 10px; margin: 4px 0; }
+.sk-bn.last{ width: 61%; }
+/* .gline is a baseline-aligned flex row with its own 10px gap, so these carry
+   no margin of their own; the 3px under the label is the descender the real
+   12px label leaves below the baseline, which is what makes the row 25px. */
+.sk-lbl    { width: 86px; height: 10px; margin-bottom: 3px; }
+.sk-gchip  { width: 70px; height: 22px; border-radius: var(--radius); }
+.gline .sk-gchip:nth-child(2) { width: 80px; }
+.gline .sk-gchip:nth-child(4) { width: 61px; }
+.gline .sk-gchip:nth-child(5) { width: 110px; }
+.gline .sk-gchip:nth-child(6) { width: 73px; }
+.gline .sk-gchip:nth-child(8) { width: 66px; }
+
 /* A genre pill is one short word plus a count, not My Books' phrases. These
    have to out-specify the .sk-pillbtn:nth-child() widths above, which are My
    Books' and otherwise win on the same strip and wrapped it to two rows.
    Widths are the real pills', measured. */
-.filters .sk-pillbtn.sk-cat { width: 92px; }
-.filters .sk-pillbtn.sk-cat:nth-child(1)  { width: 75px; }
-.filters .sk-pillbtn.sk-cat:nth-child(2)  { width: 98px; }
-.filters .sk-pillbtn.sk-cat:nth-child(3)  { width: 95px; }
-.filters .sk-pillbtn.sk-cat:nth-child(4)  { width: 97px; }
-.filters .sk-pillbtn.sk-cat:nth-child(5)  { width: 84px; }
+.filters .sk-pillbtn.sk-cat { width: 87px; }
+.filters .sk-pillbtn.sk-cat:nth-child(1)  { width: 59px; }
+.filters .sk-pillbtn.sk-cat:nth-child(2)  { width: 90px; }
+.filters .sk-pillbtn.sk-cat:nth-child(3)  { width: 82px; }
+.filters .sk-pillbtn.sk-cat:nth-child(4)  { width: 87px; }
+.filters .sk-pillbtn.sk-cat:nth-child(5)  { width: 89px; }
 .filters .sk-pillbtn.sk-cat:nth-child(6)  { width: 84px; }
-.filters .sk-pillbtn.sk-cat:nth-child(7)  { width: 87px; }
-.filters .sk-pillbtn.sk-cat:nth-child(8)  { width: 105px; }
-.filters .sk-pillbtn.sk-cat:nth-child(9)  { width: 78px; }
-.filters .sk-pillbtn.sk-cat:nth-child(10) { width: 105px; }
-.filters .sk-pillbtn.sk-cat:nth-child(11) { width: 123px; }
+.filters .sk-pillbtn.sk-cat:nth-child(7)  { width: 84px; }
+.filters .sk-pillbtn.sk-cat:nth-child(8)  { width: 87px; }
+.filters .sk-pillbtn.sk-cat:nth-child(9)  { width: 70px; }
+.filters .sk-pillbtn.sk-cat:nth-child(10) { width: 97px; }
+.filters .sk-pillbtn.sk-cat:nth-child(11) { width: 97px; }
 /* inline-block so each bar sits in its cell's own 18px line box. As blocks
    inside the real `<span data-k>` wrappers they generated anonymous boxes
    instead, which made the row 10px short on desktop and 39px tall on a phone,
@@ -1277,6 +1320,13 @@ a.chip.svc-tag:active {
 .sk-c2     { width: 88%;   height: 10px; }
 .sk-c3     { width: 56%;   height: 10px; }
 .sk-c4     { width: 22px;  height: 10px; }
+/* The head is 37px and a body row 39, both set by an 18px line box the bars
+   are 10px short of; the margins put it back without pretending the bar is
+   as tall as the text. */
+.cat-row.head .sk-c1, .cat-row.head .sk-c2,
+.cat-row.head .sk-c3, .cat-row.head .sk-c4 { margin: 4px 0; }
+.cat-row .sk-c1, .cat-row .sk-c2,
+.cat-row .sk-c3, .cat-row .sk-c4 { margin: 5px 0; }
 .cat-row:nth-child(even) .sk-c2 { width: 72%; }
 .cat-row:nth-child(3n)   .sk-c1 { width: 62px; }
 .cat-row:nth-child(3n)   .sk-c3 { width: 44%; }
@@ -1284,10 +1334,11 @@ a.chip.svc-tag:active {
 /* Services: a .svc card is a dot, a name, a status chip, one line of detail
    and a quieter footer line. */
 .sk-svcname { display: inline-block; vertical-align: middle;
-              width: 96px; height: 11px; margin: 5px 0 5px 8px; }
+              width: 80px; height: 11px; margin: 5px 0 5px 8px; }
 .sk-svcmeta { width: 62%; height: 10px; margin: 4px 0; }
 .sk-svcfoot { width: 44%; height: 9px; margin: 12px 0; }
-.svc:nth-child(even) .sk-svcname { width: 78px; }
+.svc:nth-child(even) .sk-svcname { width: 50px; }
+.svc:nth-child(3n)   .sk-svcname { width: 73px; }
 .svc:nth-child(3n)   .sk-svcmeta { width: 48%; }
 /* One line, because that paragraph is one line at any width the card grid is
    readable at. p2-p4 are phone-only: the same sentence runs to four lines once
@@ -1310,6 +1361,16 @@ a.chip.svc-tag:active {
    a target — same reason .boot-rail .svc-row drops its own cursor above. */
 .boot .rail-check { cursor: default; }
 .boot .rail-check:hover, .boot .rail-check:active { background: none; }
+/* Services' second and third panels: two 18px key/value rows, and the block
+   the credentials form loads into — 90px is what .state.loading measures, and
+   that block is the next thing on screen here, not the fields themselves. */
+.sk-dt     { display: inline-block; vertical-align: middle; width: 60px; height: 10px;
+             margin: 4px 0; }
+.sk-dd     { display: inline-block; vertical-align: middle; width: 132px; height: 10px;
+             margin: 4px 0; }
+.sk-dd.short { width: 64px; }
+.sk-fields { height: 90px; border-radius: var(--radius); }
+
 .sk-check      { width: 13px; height: 13px; margin: 2px 0 0; border-radius: 3px; }
 .sk-checklabel { width: 226px; height: 10px; margin: 4px 0 3px; }
 .rail-note .sk-note { display: inline-block; vertical-align: middle; width: 167px; margin: 3px 0; }

@@ -81,11 +81,21 @@ function skHead(subWidth = '160px') {
     <div class="sub"><span class="sk sk-sub" style="width:${subWidth}"></span></div></div>`;
 }
 
+/* A row is 116px, not the 89 three stacked bars come to. The two missing
+   pieces are the ones that make it a row worth reading: the blocker line —
+   stage chip, service chip, and the message under them — and a .side that
+   carries a status chip over "6 of 8 stages" rather than one bar. */
 function skBookRows(n) {
   return `<div class="book-list">${skRepeat(n, `<div class="book-row">
       ${sk('sk-cover')}
-      <div>${sk('sk-title')}${sk('sk-byline')}${sk('sk-meta')}</div>
-      <div class="side">${sk('sk-dots')}</div>
+      <div>${sk('sk-title')}${sk('sk-byline')}${sk('sk-meta')}
+        <div class="blocker">${sk('sk-bchip')}${sk('sk-bsvc')}
+          <div class="msg">${sk('sk-bmsg')}</div>
+        </div>
+      </div>
+      <div class="side">${sk('sk-schip')}
+        <div class="pipeline-cap">${sk('sk-cap')}</div>
+      </div>
     </div>`)}</div>`;
 }
 
@@ -138,7 +148,11 @@ function skeletonFor(name) {
       </div>
       <div class="panel">
         <h2>${sk('sk-head')}<span class="grow"></span>${sk('sk-head short')}</h2>
-        <div class="body tight panel-meta">${sk('sk-note')}</div>
+        <div class="body tight panel-meta">
+          <div class="band-note">${sk('sk-bn')}${sk('sk-bn last')}</div>
+          <div class="gline">${sk('sk-lbl')}${skRepeat(8, sk('sk-gchip'))}</div>
+          <div class="gline">${sk('sk-lbl')}${skRepeat(3, sk('sk-gchip'))}</div>
+        </div>
         ${skBookRows(6)}
       </div></div>`;
   }
@@ -159,7 +173,17 @@ function skeletonFor(name) {
       </div>
       <div class="panel">
         <h2>${sk('sk-head short')}<span class="grow"></span>${sk('sk-btn act')}</h2>
-        <div class="body">${sk('sk-p1')}</div>
+        <div class="body"><dl class="kv">
+          <dt>${sk('sk-dt')}</dt><dd>${sk('sk-dd')}</dd>
+          <dt>${sk('sk-dt')}</dt><dd>${sk('sk-dd short')}</dd>
+        </dl></div>
+      </div>
+      <div class="panel">
+        <h2>${sk('sk-head')}<span class="grow"></span>${sk('sk-btn act')}</h2>
+        <div class="body">
+          <p class="small muted" style="margin-top:0">${sk('sk-p1')}</p>
+          ${sk('sk-fields')}
+        </div>
       </div></div>`;
   }
   if (name === 'activity') {
