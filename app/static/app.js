@@ -59,6 +59,48 @@ function stateBlock(kind, text, action = '') {
     `<span>${escapeHtml(text)}</span>${action}</div>`;
 }
 
+/* ------------------------------------------------------- loading skeletons
+ *
+ * The shape of the page that is coming, for the moment before it can be drawn.
+ * index.html ships the dashboard's as static markup because it has to exist
+ * before this file does; these are the same idea for every other route, and
+ * they are used in two places — the first load, where `state` has not arrived
+ * yet, and a route change into a view that has to fetch before it can render.
+ *
+ * They are built from the real classes (.book-row, .cat-row, .svc, .panel), so
+ * they inherit the real grids and breakpoints and cannot drift from the views
+ * they stand in for. `sk()` is only a bar; everything structural is the view's
+ * own markup.
+ */
+const sk = (cls = '') => `<span class="sk ${cls}"></span>`;
+const skRepeat = (n, html) => Array.from({ length: n }, () => html).join('');
+
+/* The <h1> and its one-line summary, which every list view opens with. */
+function skHead(subWidth = '160px') {
+  return `<div class="page-head"><div class="title-row">${sk('sk-h1')}</div>
+    <div class="sub"><span class="sk sk-sub" style="width:${subWidth}"></span></div></div>`;
+}
+
+function skBookRows(n) {
+  return `<div class="book-list">${skRepeat(n, `<div class="book-row">
+      ${sk('sk-cover')}
+      <div>${sk('sk-title')}${sk('sk-byline')}${sk('sk-meta')}</div>
+      <div class="side">${sk('sk-dots')}</div>
+    </div>`)}</div>`;
+}
+
+function skeletonFor(name) {
+  if (name === 'books') {
+    return `<div class="boot" role="status"><span class="sr-only">Loading…</span>
+      ${skHead('210px')}
+      <div class="toolbar"><div class="filters">
+        ${skRepeat(7, sk('sk-pillbtn'))}
+      </div></div>
+      <div class="panel">${skBookRows(8)}</div></div>`;
+  }
+  return '';
+}
+
 /* The title block every list view opens with. `sub`, `crumbs` and `extra` are
  * HTML the caller has already escaped; only the title is escaped here. */
 function pageHead(title, sub = '', crumbs = '', extra = '') {
@@ -2029,7 +2071,9 @@ async function render() {
   const view = $('#view');
 
   if (!state) {
-    setHtml(view, stateBlock('loading', 'Loading…'));
+    // The route's own shape, not a spinner: this is the first load, so there is
+    // nothing else on screen to give the wait a context.
+    setHtml(view, skeletonFor(r.name) || stateBlock('loading', 'Loading…'));
     return;
   }
 
@@ -2185,6 +2229,15 @@ document.addEventListener('click', e => {
 });
 
 document.addEventListener('DOMContentLoaded', () => {
+  // index.html ships the dashboard's skeleton because it must exist before this
+  // file loads. On any other route, swap it for that route's before the first
+  // fetch starts — otherwise a refresh on #/books spends the whole load showing
+  // a dashboard that is not coming.
+  const first = route().name;
+  if (first !== 'dashboard') {
+    const shape = skeletonFor(first);
+    if (shape) setHtml($('#view'), shape);
+  }
   refresh();
   setInterval(() => refresh({ poll: true }), 6000);
   // A poll held back while a field had focus lands the moment focus leaves.

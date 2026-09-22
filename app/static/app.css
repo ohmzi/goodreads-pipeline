@@ -1210,6 +1210,33 @@ a.chip.svc-tag:active {
 @keyframes sk-sheen { to { background-position: -200% 0; } }
 @keyframes boot-in  { to { opacity: 1; } }
 
+/* ================================================ list-view skeletons */
+/* The bars the other routes' skeletons are made of — see skeletonFor() in
+   app.js. Everything structural there is the view's own markup (.book-row,
+   .cat-row, .svc, .toolbar), so these only have to stand in for the text. */
+/* inline-block, not block: .title-row and .sub have no padding or border, so a
+   block child's margins collapse straight through them and the head came out
+   24px short of the real one. */
+.sk-h1     { display: inline-block; width: 168px; height: 22px; margin: 3px 0; }
+.sk-sub    { display: inline-block; height: 10px; margin: 6px 0 14px; }
+/* Pill widths are each label's own width, because the strip wraps: too narrow
+   and it fits on fewer rows than the real one does, which showed up as a
+   45px-short toolbar on a phone rather than as anything visible on desktop. */
+.sk-pillbtn{ display: inline-block; width: 140px; height: 28px; border-radius: 999px; }
+.filters .sk-pillbtn:nth-child(2) { width: 155px; }
+.filters .sk-pillbtn:nth-child(3) { width: 100px; }
+.filters .sk-pillbtn:nth-child(4) { width: 125px; }
+.filters .sk-pillbtn:nth-child(5) { width: 110px; }
+.filters .sk-pillbtn:nth-child(6) { width: 120px; }
+.filters .sk-pillbtn:nth-child(7) { width: 80px; }
+
+/* A book row is 52px cover / title block / status dots. */
+.sk-cover  { width: 52px; height: 78px; border-radius: 3px; }
+.sk-title  { width: 58%; height: 13px; margin: 5px 0 0; }
+.sk-byline { width: 44%; height: 10px; margin: 8px 0 0; }
+.sk-meta   { width: 30%; height: 9px; margin: 8px 0 0; }
+.sk-dots   { width: 96px; height: 9px; margin-top: 2px; }
+
 /* =============================================================== alerts */
 /* The two real .flashNotification surfaces plus the gold .gr-errorMessage box.
    Their old app-invented tints are gone; every pair below is in the ledger. */
