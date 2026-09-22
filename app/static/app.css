@@ -1126,12 +1126,24 @@ a.chip.svc-tag:active {
 .sk-w1   { width: 62%; height: 11px; }
 .sk-w2   { width: 44%; height: 9px; margin-top: 6px; }
 .sk-chip { width: 74px; height: 17px; border-radius: var(--radius); }
+/* Three lines, not two: a real row carries the detail sentence plus a
+   two-line italic explanation under it, so two bars stood at about half the
+   height these rows actually land at and the panel came up visibly short. */
 .sk-l1   { width: 88%; height: 10px; }
-.sk-l2   { width: 62%; height: 10px; margin-top: 7px; }
+.sk-l2   { width: 96%; height: 10px; margin-top: 7px; }
+.sk-l3   { width: 54%; height: 10px; margin-top: 7px; }
 .stage-row:nth-child(3) .sk-l1 { width: 72%; }
-.stage-row:nth-child(3) .sk-l2 { width: 48%; }
+.stage-row:nth-child(3) .sk-l3 { width: 41%; }
 .stage-row:nth-child(4) .sk-l1 { width: 94%; }
-.stage-row:nth-child(5) .sk-l2 { width: 35%; }
+.stage-row:nth-child(4) .sk-l2 { width: 78%; }
+.stage-row:nth-child(5) .sk-l1 { width: 66%; }
+.stage-row:nth-child(5) .sk-l3 { width: 36%; }
+.stage-row:nth-child(6) .sk-l2 { width: 88%; }
+
+/* The one header item that is genuinely unknown on first paint: how many
+   services are healthy. The five nav labels are fixed and are rendered as the
+   real links in index.html, so only the count needs standing in for. */
+.sk-pill { width: 104px; height: 11px; }
 
 /* The log's own three tracks: 104px stamp, 110px service, then the line. */
 .sk-t { width: 82px;  height: 9px; }

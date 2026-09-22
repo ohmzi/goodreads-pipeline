@@ -21,7 +21,14 @@
   <header class="bar">
     <div class="bar-inner">
       <a class="wordmark" href="#/">goodreads</a>
-      <nav class="nav" id="nav" aria-label="Primary"></nav>
+      <!-- The real links, not placeholders: these five labels are fixed, so
+           rendering them here means the header is complete and usable on the
+           first paint — you can change page before any data has loaded.
+           renderMasthead() replaces this with the same markup plus the right
+           `active`, so the only thing that can change is which tab is lit.
+           Home is marked because "#/" is the route you land on; a deep link
+           corrects it on the first render. -->
+      <nav class="nav" id="nav" aria-label="Primary"><a href="#/" class="active" aria-current="page">Home</a><a href="#/books">My Books</a><a href="#/genres">Genres</a><a href="#/services">Services</a><a href="#/activity">Activity</a></nav>
       <span class="spacer"></span>
       <div class="bar-search">
         <input type="search" id="global-search" placeholder="Search books"
@@ -42,7 +49,7 @@
       <div class="acct-panel" id="acct-panel">
         <!-- The one control with no Goodreads equivalent: service health, always
              on screen, one click from the page that explains and logs it. -->
-        <a class="health-pill" id="health-pill" href="#/services"></a>
+        <a class="health-pill" id="health-pill" href="#/services"><span class="sk sk-pill" aria-hidden="true"></span><span class="sr-only">Checking services</span></a>
         <div class="bar-account">
           <a class="nav-link" href="#" onclick="signOut();return false;">Sign out</a>
         </div>
@@ -80,25 +87,31 @@
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span></div>
               <div><span class="sk sk-btn"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span></div>
               <div><span class="sk sk-btn"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span></div>
               <div><span class="sk sk-btn"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span></div>
+              <div><span class="sk sk-btn"></span></div>
+            </div>
+            <div class="stage-row">
+              <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
+              <div><span class="sk sk-chip"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span></div>
               <div><span class="sk sk-btn"></span></div>
             </div>
           </section>
