@@ -171,6 +171,13 @@ CREATE INDEX IF NOT EXISTS idx_events_ts ON events (ts DESC);
 """
 
 
+#: Longest event message kept, in characters. Generous next to anything the app
+#: writes itself — the longest real message is a stage failure naming a service
+#: and its response — and it exists to bound what a caller can put in the feed,
+#: not to shorten ours.
+_MAX_EVENT_CHARS = 500
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -813,10 +820,27 @@ class Database:
     # -- events ----------------------------------------------------------
     def log(self, message: str, level: str = "info", book_id: int | None = None,
             stage: str | None = None, service: str = "") -> None:
+        """Record an event, normalised and bounded.
+
+        Both happen here because this is the only `INSERT INTO events` in the
+        repo, and most of what reaches it is not ours to trust: exception text,
+        service responses, and — on the sign-in path, which is reachable with
+        no session — a caller-supplied username. `/api/state` re-sends the
+        newest 60 events to every open browser every six seconds, so a single
+        unbounded row was enough to push every real line out of the operator's
+        activity feed. One edit here covers all of it; a call site added later
+        inherits the bound rather than having to remember it.
+        """
+        text = " ".join(str(message).split())
+        if len(text) > _MAX_EVENT_CHARS:
+            # Clipped, and *visibly* clipped. A silently shortened line reads
+            # as a whole one, and the one message that mattered is exactly the
+            # one long enough to be cut.
+            text = text[: _MAX_EVENT_CHARS - 1] + "…"
         self.execute(
             "INSERT INTO events (ts, level, book_id, stage, service, message) "
             "VALUES (?,?,?,?,?,?)",
-            (_now(), level, book_id, stage, service, message),
+            (_now(), level, book_id, stage, service, text),
         )
 
     def recent_events(self, limit: int = 100, service: str | None = None,

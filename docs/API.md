@@ -23,11 +23,11 @@ sources of truth for its behaviour: the SQLite database on the data volume, and
 | Request bodies | JSON (`Content-Type: application/json`). Only `PUT /api/settings`, the login route and a few small assignment and toggle bodies take one; every other route takes nothing |
 | Responses | JSON, except the three HTML pages and the noVNC assets |
 | Method | `GET`, `POST`, `PUT` and one WebSocket. No `DELETE`, no `PATCH`. The API routes do not answer `HEAD`, so `curl -I` returns 405 |
-| Trailing slash | Significant. `/api/health/` is not `PUBLIC_PATHS`, so it is gated like everything else (`app/main.py:49-55`, an exact string match) |
+| Trailing slash | Significant. `/api/health/` is not `PUBLIC_PATHS`, so it is gated like everything else (`app/main.py:57`, an exact string match) |
 | Pagination | None. `GET /api/state` returns every book on every call |
 | CORS | Not enabled. No middleware is registered for it, so a browser page on another origin cannot read these responses. Clients are the app's own UI or a script |
 | Rate limiting | Only on `POST /api/auth/login` |
-| Generated schema | `GET /openapi.json` (needs a session) serves a FastAPI-generated schema. It documents the parameters, and describes every response body as an unconstrained object, because the handlers are annotated `-> dict` (`app/main.py:498`) |
+| Generated schema | `GET /openapi.json` (needs a session) serves a FastAPI-generated schema. It documents the parameters, and describes every response body as an unconstrained object, because the handlers are annotated `-> dict` (`app/main.py:1368`) |
 
 ### Error shapes
 
@@ -35,9 +35,16 @@ Three, and they are not interchangeable:
 
 | Shape | Where | Example |
 |---|---|---|
-| `{"error": "..."}` | The session middleware, and the login route's own 401/429 | `{"error": "authentication required"}` |
-| `{"detail": "..."}` | `HTTPException` raised inside a handler — every 404 and the category 400 | `{"detail": "no such book"}` |
+| `{"error": "..."}` | The session middleware, the cross-origin refusal, and the login route's own 401/429 | `{"error": "authentication required"}` |
+| `{"detail": "..."}` | `HTTPException` raised inside a handler — every 404, the category 400 and the settings 400 | `{"detail": "no such book"}` |
 | `{"detail": [ ... ]}` | FastAPI request validation, always `422` | `{"type": "missing", "loc": ["body", "category"], ...}` |
+
+**`403` comes before `401`.** A request whose `Origin` disagrees with the host it
+was sent to is refused with `403 {"error": "cross-origin request refused"}`
+*before* the session is looked at, so a script that sends no `Origin` is
+unaffected while a cross-site one learns nothing about whether it holds a
+session. Sending no `Origin` at all is always allowed — see *Conventions*
+above and [SECURITY.md](SECURITY.md).
 
 `POST /api/settings/test/{service}` is the exception to the rule that failures
 use an error status: a service that fails its check returns `200` with
@@ -53,8 +60,8 @@ subsequent request.
 ### The cookie
 
 `goodreads_session` (`app/auth.py:34`), set by `POST /api/auth/login`
-(`app/main.py:188-198`) and read on every request by the middleware
-(`app/main.py:100`) and by the WebSocket handshake (`app/main.py:227`).
+(`app/main.py:384`) and read on every request by the middleware
+(`app/main.py:165`) and by the WebSocket handshake (`app/main.py:467`).
 
 | Attribute | Value |
 |---|---|
@@ -62,7 +69,7 @@ subsequent request.
 | `Max-Age` | 604800 seconds (7 days), also carried as `exp` inside the signed payload (`app/auth.py:35`) |
 | `HttpOnly` | yes — JavaScript cannot read it, so `document.cookie` in the app's own page shows nothing |
 | `SameSite` | `Lax` — withholds the cookie on a cross-site POST, which is the CSRF case that matters here |
-| `Secure` | only when `COOKIE_SECURE=1`. Left off by default because the app serves plain HTTP on the LAN, and a `Secure` cookie over HTTP is silently dropped (`app/main.py:194-196`) |
+| `Secure` | only when `COOKIE_SECURE=1`. Left off by default because the app serves plain HTTP on the LAN, and a `Secure` cookie over HTTP is silently dropped (`app/main.py:382`) |
 | `Path` | `/` |
 
 The signature and the payload's password epoch are verified before anything
@@ -89,12 +96,22 @@ curl -s -b cookies.txt -X POST http://<host>:8091/api/sweep
 file. A wrong password or an unknown username both return
 `401 {"error": "invalid username or password"}` after a progressive delay — the
 delay is deliberate, so a script that retries in a loop will get slower rather
-than faster. Signing out is `POST /api/auth/logout`, which is itself gated: it
-deletes the cookie (`app/main.py:205`) and an unauthenticated call gets the
-usual `401` instead.
+than faster. Under enough concurrent failures a sign-in can also answer
+`429 {"error": "too many sign-in attempts in progress — try again shortly"}`;
+that is a slot wait of up to a second expiring, not a lockout.
 
-The WebSocket is authenticated with the same cookie, sent on the handshake. A
-browser does that automatically; a script has to set the `Cookie` header itself.
+Signing out is `POST /api/auth/logout`, which is itself gated: an
+unauthenticated call gets the usual `401`. It does more than delete the cookie —
+it rotates the user's `session_epoch`, so **every** token minted for that user
+stops being accepted, on every device (`app/main.py:399`). A copy of the cookie
+taken earlier is dead the moment this returns. That is the intended reading of
+"sign out" here: there is no per-session revocation, because there is no session
+table to revoke against.
+
+The WebSocket is authenticated with the same cookie, sent on the handshake, and
+the handshake's `Origin` must match too. A browser does both automatically; a
+script has to set the `Cookie` header itself and, if it sends an `Origin`, send
+one that matches the host it is dialing.
 
 ### Failed sign-ins
 
@@ -103,20 +120,21 @@ browser does that automatically; a script has to set the `Cookie` header itself.
 | Free attempts | 3 per key, then a delay | `app/auth.py:179-186` |
 | Delay | 0.5 s doubling per failure, ceiling 8 s | `app/auth.py:229` |
 | Window | 15 minutes | `app/auth.py:179-186` |
-| Keys | username (lowercased) and client address, counted separately; the larger delay wins | `app/main.py:145-146`, `app/main.py:172` |
-| Concurrent sign-ins | 8, throttled by a semaphore; a 9th gets `429` | `app/main.py:139`, `app/main.py:148` |
-| Never | A lockout. A correct password is always answered, so an attacker cannot lock the owner out | `app/auth.py:165-177` |
+| Keys | username (lowercased) and client address, counted separately; the larger delay wins | `app/main.py:323`, `app/main.py:324` |
+| Concurrent sign-ins | 8. A sign-in waits up to 1s for a slot and only then gets `429` | `app/main.py:271`, `app/main.py:331` |
+| The delay | Held *inside* the slot on purpose — that is what bounds how many guesses a flood lands per second | `app/main.py:362` |
+| Not a lockout | A correct password is answered unless every slot is busy for a full second, under a flood | `app/main.py:331` |
 
 The client address comes from the socket peer unless `TRUST_PROXY=1`, in which
 case `X-Forwarded-For` is honoured — the header is caller-controlled, so
 trusting it without a proxy that rewrites it is a free bypass of the per-client
-limit (`app/main.py:120-133`).
+limit (`app/main.py:252`).
 
 ### What is reachable without a session
 
-`PUBLIC_PATHS` is the complete set (`app/main.py:49-55`). Everything else — the
+`PUBLIC_PATHS` is the complete set (`app/main.py:57`). Everything else — the
 pages, `/static`, every route under `/api/`, `/vnc/` and the WebSocket — is
-gated by one middleware (`app/main.py:94-106`).
+gated by one middleware (`app/main.py:147`).
 
 | Path | Why it is open |
 |---|---|
@@ -124,7 +142,7 @@ gated by one middleware (`app/main.py:94-106`).
 | `/api/auth/login` | The route the form posts to |
 | `/api/auth/status` | The sign-in page asks whether to render the form; the answer reveals only whether the caller already holds a session |
 | `/api/health` | The container healthcheck (`docker-compose.yml:38-40`) |
-| `/favicon.ico` | `GET /favicon.ico` serves the real icon, long-cached (`app/main.py:361-374`) |
+| `/favicon.ico` | `GET /favicon.ico` serves the real icon, long-cached (`app/main.py:580`) |
 | `/static/app.css`, `/static/app.js` | Open so the sign-in page can load them before a session exists — it loads its stylesheet from `/static/`, and the gate answering with a 303 to `/login` made the browser parse the sign-in page itself as CSS. Both are static files carrying no state. The rest of `/static` stays gated |
 
 The allowlist is an exact string match on the path, so a query string does not
@@ -158,7 +176,7 @@ functions). Grouped by area.
 | Method | Path | Session | Request | Returns |
 |---|---|---|---|---|
 | POST | `/api/auth/login` | no | `{"username": str, "password": str}` | `200 {"ok": true, "username": "<name>"}` and sets the cookie; `401 {"error": "invalid username or password"}`; `429 {"error": "too many sign-in attempts in progress — try again shortly"}` |
-| POST | `/api/auth/logout` | yes | — | `200 {"ok": true}`, cookie deleted with `Path=/` |
+| POST | `/api/auth/logout` | yes | — | `200 {"ok": true}`, cookie deleted with `Path=/`, and the user's `session_epoch` rotated so every outstanding token for them stops working |
 | GET | `/api/auth/status` | no | — | `{"authenticated": bool, "username": str\|null}` |
 
 The login handler strips the username, verifies the password against scrypt in a
@@ -389,23 +407,33 @@ release a hold (`app/breaker.py:732-813`, `app/main.py:1183-1206`).
 
 `GET` returns the fields the UI knows how to render, each with `key`, `label`,
 `hint` and `is_set`, plus the service URLs this instance calls
-(`app/main.py:1025-1039`). It never returns a credential value; there is no
-route that does, because stored credentials are Fernet-encrypted with the key
-from `.env` and only ever decrypted inside the process
-(`app/crypto.py:31-42`).
+(`app/main.py:1538`). It never returns a credential value; there is no route
+that does, because stored credentials are Fernet-encrypted with the key from
+`.env` and only ever decrypted inside the process (`app/crypto.py:31-37`).
 
 `PUT` is the only writer. An empty string deletes the key
-(`app/main.py:1049-1052`); a non-empty one encrypts and stores it. Keys not in
-`CREDENTIAL_FIELDS` are still stored and still round-trip — that list drives the
-form, not the schema (`app/main.py:59-75`). `saved` lists only the keys given a
-value, so a request that only clears fields returns an empty list. One request
-writes all its values under one log line, and the whole payload is a dict: there
-is no per-key route.
+(`app/main.py:1570`); a non-empty one encrypts and stores it. `saved` lists only
+the keys given a value, so a request that only clears fields returns an empty
+list. One request writes all its values under one log line, and the whole
+payload is a dict: there is no per-key route.
 
-`POST .../test/{service}` constructs that service's client and calls its own
-`health()` route, returning the result as a string. It writes nothing and
-records nothing — it is not the authenticated probe
-(`app/main.py:1059-1073`).
+**A key that is not in `CREDENTIAL_FIELDS` is refused**, with
+`400 {"detail": "unknown credential key(s): ..."}` (`app/main.py:71`,
+`app/main.py:1559`). The check runs over the whole body *before* anything is
+written, which matters because an empty string is how a key is deleted: a body
+that was going to be rejected can no longer take a real credential with it on
+the way to the failure. That list therefore does drive the schema, and the form
+is generated from the same list, so a field the UI offers is always a field this
+accepts.
+
+`POST .../test/{service}` runs the **same authenticated probe** the background
+health check runs (`app/health.py:124`): it lists libraries for the library
+apps, lists notebooks for Open Notebook, and calls the health route only for
+Shelfmark, which takes no credential on this deployment. It used to call each
+client's own `health()` route, and every one of those is unauthenticated — so a
+wrong API key passed the Test button and the panels could show a green tick
+beside a red banner naming the same service. It returns
+`200 {"ok": bool, "detail": str}`, writes nothing, and records nothing.
 
 ### Goodreads login
 

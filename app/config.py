@@ -86,6 +86,15 @@ class Settings:
     trust_proxy: bool = field(
         default_factory=lambda: _env("TRUST_PROXY", "0") == "1"
     )
+    # What this app is reached as, when that differs from the Host header a
+    # request arrives with. The same-origin check on state-changing requests
+    # and on the VNC handshake compares a request's `Origin` against its own
+    # `Host`, which is correct whenever nothing rewrites it. A reverse proxy
+    # that does rewrite Host — terminating TLS on a public name and forwarding
+    # to `goodreads:8090`, say — makes the two disagree, and without this the
+    # VNC panel silently stops connecting. Set it to the origin a browser
+    # actually uses, scheme and port included: `https://goodreads.example.com`.
+    public_origin: str = field(default_factory=lambda: _env("PUBLIC_ORIGIN"))
 
     # --- service endpoints ---------------------------------------------
     shelfmark_url: str = field(

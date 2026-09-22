@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
@@ -22,7 +23,6 @@ from starlette.concurrency import run_in_threadpool
 
 from . import __version__, auth, breaker, models, version_data
 from .clients.abs_client import AudiobookshelfClient
-from .clients.base import ClientError
 from .clients.booklore import BookLoreClient, GrimmoryClient
 from .clients.kavita import KavitaClient
 from .clients.opennotebook import OpenNotebookClient
@@ -33,6 +33,7 @@ from .db import db
 from .goodreads import GoodreadsSession, resolve_user_id, set_user_id
 from .login import login_session
 from .pathing import free_space_gb
+from .permissions import harden_data_dir
 from .pipeline import Scheduler
 from .stages import shelve as shelve_stage
 
@@ -83,6 +84,10 @@ CREDENTIAL_FIELDS: list[tuple[str, str, str]] = [
     ("hardcover_api_key", "Hardcover API key", "optional, not yet used"),
 ]
 
+#: Just the keys, for validating a settings write before it reaches the
+#: database. Derived from `CREDENTIAL_FIELDS` so the two cannot drift apart.
+_CREDENTIAL_KEYS = frozenset(key for key, _, _ in CREDENTIAL_FIELDS)
+
 SERVICE_FACTORIES = {
     "shelfmark": ShelfmarkClient,
     "kavita": KavitaClient,
@@ -100,9 +105,89 @@ _DUMMY_HASH = auth.hash_password(auth.generate_password(24))
 # --------------------------------------------------------------------------
 # authentication
 # --------------------------------------------------------------------------
+def _host_of(value: str) -> str:
+    """The `host:port` part of an `Origin` header, a `Host` header or a URL.
+
+    Both spellings arrive here: an `Origin` is a URL (`https://host:8443`) and
+    a `Host` header is a bare authority (`host:8443`). Parsing them the same
+    way is what makes the comparison a comparison rather than a guess.
+    """
+    value = (value or "").strip()
+    if not value:
+        return ""
+    parsed = urlparse(value if "//" in value else f"//{value}")
+    return (parsed.netloc or "").lower()
+
+
+def _refused_origin(origin: str, host: str) -> bool:
+    """Whether a request a browser sent came from another site.
+
+    This is the CSRF question, and it is deliberately not left to
+    `SameSite=Lax`: that is a browser-side control, so it does nothing at all
+    for a caller that is not a browser, and it withholds cookies on a
+    cross-site POST but not on a cross-site GET — which is exactly the shape of
+    the requests worth attacking here (`/api/sweep` moves real files).
+
+    A missing `Origin` is allowed, and has to be: browsers omit it on
+    same-origin navigations, and neither the container's own healthcheck nor
+    the pipeline's service calls is a browser at all. So this answers "did
+    another site send this?", never "is this caller signed in?" — the session
+    cookie is the second question and is asked separately.
+
+    `settings.public_origin` wins when set, because a proxy that rewrites
+    `Host` makes the request's own header the wrong thing to compare against.
+    """
+    if not origin:
+        return False
+    expected = _host_of(settings.public_origin) or _host_of(host)
+    return bool(expected) and _host_of(origin) != expected
+
+
 @app.middleware("http")
 async def require_session(request: Request, call_next):
-    path = request.url.path
+    # `request.scope["path"]`, never `request.url.path`. The router matches on
+    # the scope path, but `request.url.path` reparses the URL and so cuts it at
+    # a decoded `?`: with a scope path of `/static/app.css%3F/../app.js` it
+    # answered `/static/app.css`, which is a public asset, so the request was
+    # waved through and then reached a mount and a fallback the router would
+    # never have matched it to. Comparing the same string the router matches
+    # closes that and the Host-header variant of it at once.
+    path = request.scope["path"]
+
+    origin = request.headers.get("origin", "")
+    if _refused_origin(origin, request.headers.get("host", "")):
+        # Logged only when the caller actually held a session. This check runs
+        # before the session check, so an anonymous caller can reach it at
+        # will, and a line per attempt would be a way to fill the activity feed
+        # — the same eviction `_log_failed_login` exists to stop. A *signed-in*
+        # browser being refused is the case worth a line, because the symptom
+        # otherwise is a page that quietly stops working.
+        if auth.session_username(request.cookies.get(auth.COOKIE_NAME)):
+            db().log(
+                f"refused a cross-origin request to {path} from {origin}",
+                level="warning",
+            )
+        return JSONResponse(
+            {"error": "cross-origin request refused"}, status_code=403
+        )
+
+    # `Range` is dropped for the whole static mount, before the public-path
+    # check so it applies to gated files too. Starlette below 1.6.0 merges
+    # overlapping byte ranges with a nested loop, so one request carrying
+    # thousands of ranges is a cheap way to burn CPU — and `/static/app.css`
+    # and `/static/app.js` are reachable with no session at all, which is what
+    # made this worth doing rather than merely worth pinning. Nothing here
+    # wants partial content — the mount holds a stylesheet, a script, a
+    # favicon and the pages, and a browser fetching any of them wants the
+    # whole file — so serving it in one piece is the same answer, and partial
+    # content buys nothing worth an O(n^2) merge.
+    if path.startswith("/static/"):
+        request.scope["headers"] = [
+            (name, value)
+            for name, value in request.scope["headers"]
+            if name.lower() != b"range"
+        ]
+
     if path in PUBLIC_PATHS:
         return await call_next(request)
 
@@ -113,6 +198,42 @@ async def require_session(request: Request, call_next):
     if path.startswith("/api/") or path.startswith("/vnc/"):
         return JSONResponse({"error": "authentication required"}, status_code=401)
     return RedirectResponse("/login", status_code=303)
+
+
+#: Applied to every response, via `setdefault` so a route that sets its own
+#: value keeps it.
+#:
+#: There is deliberately no Content-Security-Policy here. The obvious one
+#: blanks the UI: `img-src 'self' data:` kills every book cover, because
+#: `cover_url` is scraped straight from Goodreads and never proxied locally,
+#: along with the two `s.gr-assets.com` backgrounds (the header wordmark and
+#: the nav magnifier). `script-src 'unsafe-inline'` would have to be granted to
+#: keep the pages' inline handlers working, which is most of what a CSP is for.
+#: Four headers that cannot break anything are worth more than five that can.
+_SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
+    # Stops a response that is not the type it claims from being sniffed into
+    # one that is.
+    ("X-Content-Type-Options", "nosniff"),
+    # Full URLs leak into the Referer of anything a page links out to. Nothing
+    # here needs to tell another site where the operator came from.
+    ("Referrer-Policy", "no-referrer"),
+    # SAMEORIGIN, not DENY: `/goodreads` frames `/vnc/vnc.html`, which is
+    # same-origin, so DENY would blank the Goodreads login panel.
+    ("X-Frame-Options", "SAMEORIGIN"),
+)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    for name, value in _SECURITY_HEADERS:
+        response.headers.setdefault(name, value)
+    # API answers are per-session state, never worth caching. Set last and
+    # still via setdefault, so a route that already decided its own caching
+    # policy is not overruled.
+    if request.scope["path"].startswith("/api/"):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.get("/api/health")
@@ -151,25 +272,72 @@ def _client_key(request: Request) -> str:
 #: and allocate far more than this box should be asked for.
 _login_slots = asyncio.Semaphore(8)
 
+#: How long a sign-in waits for one of those slots before being refused. The
+#: throttle's delay is deliberately held *inside* the slot — that is what bounds
+#: how fast anyone can guess — so under a flood slots turn over slowly, and
+#: refusing the moment all eight were busy turned any eight concurrent failures
+#: into a 429 for the owner's own correct password. Waiting briefly costs a real
+#: sign-in a second at worst and costs a flood eight more slots' worth of delay.
+_LOGIN_SLOT_WAIT_SECONDS = 1.0
+
+#: Longest username kept. Nothing bounds usernames today and the only account is
+#: created from the CLI, so this truncates rather than rejecting: the 401 still
+#: reads correctly and an existing credential cannot be made unusable.
+MAX_USERNAME_CHARS = 64
+
+#: Log the first failed sign-in from a client, then every Nth after that.
+_FAILED_LOGIN_EVERY = 10
+
 #: What a sign-in gets when "Keep me signed in." is unticked: the cookie stops
 #: twelve hours later rather than at the full session lifetime, which is all a
 #: shared machine should be trusted with.
 _SHORT_TTL_SECONDS = 12 * 3600
 
 
+def _log_failed_login(username: str, ip_key: str, request: Request) -> None:
+    """Record a failed sign-in, but not once per attempt.
+
+    `/api/state` re-sends the newest 60 events to every open browser every six
+    seconds, and `/api/auth/login` is reachable without a session — so one
+    anonymous caller in a loop was enough to push every real line out of the
+    feed. The throttle already counts attempts per key, so this reads that
+    count rather than keeping a second one: the first failure from a client is
+    logged, and then every tenth, each line carrying the running count. The
+    audit trail survives; the eviction does not.
+    """
+    failures = auth.throttle.recent_failures(ip_key)
+    if failures == 1 or failures % _FAILED_LOGIN_EVERY == 0:
+        db().log(
+            f"failed login for '{username}' from {_client_key(request)} "
+            f"({failures} in the last {auth.throttle.window // 60} min)",
+            level="warning",
+        )
+
+
 @app.post("/api/auth/login")
 async def auth_login(body: LoginBody, request: Request) -> JSONResponse:
     username = body.username.strip()
+    # Bounded where it is *used* rather than by the model. `Field(max_length=)`
+    # would reject the request instead, and the only account there is was
+    # created from the CLI — so a cap the model enforced could lock the
+    # operator out of their own UI over a username that already exists.
+    safe_name = username[:MAX_USERNAME_CHARS]
     ip_key = f"ip:{_client_key(request)}"
-    user_key = f"user:{username.lower()}"
+    user_key = f"user:{safe_name.lower()}"
 
-    if _login_slots.locked():
+    # Wait for a slot rather than refuse when all eight are busy. See
+    # `_LOGIN_SLOT_WAIT_SECONDS`: the delay below holds its slot on purpose, so
+    # an instant refusal here was reachable by an attacker aiming a flood at a
+    # known username, and it landed on the owner's correct password too.
+    try:
+        await asyncio.wait_for(_login_slots.acquire(), timeout=_LOGIN_SLOT_WAIT_SECONDS)
+    except asyncio.TimeoutError:
         return JSONResponse(
             {"error": "too many sign-in attempts in progress — try again shortly"},
             status_code=429,
         )
 
-    async with _login_slots:
+    try:
         row = db().get_user(username)
         # A missing user is verified against a dummy hash so it costs the same
         # as a wrong password — otherwise response time reveals valid usernames.
@@ -187,16 +355,24 @@ async def auth_login(body: LoginBody, request: Request) -> JSONResponse:
             # above, so this can only ever punish a wrong guess — which is what
             # stops this being a lockout an attacker can aim at a known
             # username to shut the owner out of their own UI.
+            #
+            # The sleep stays *inside* the slot on purpose. It is what bounds
+            # how many guesses a flood can land per second; releasing the slot
+            # first would let an attacker pipeline scrypt at pure slot speed.
             delay = max(auth.throttle.delay_for(ip_key), auth.throttle.delay_for(user_key))
             if delay:
                 await asyncio.sleep(delay)
-            db().log(
-                f"failed login for '{username}' from {_client_key(request)}",
-                level="warning",
-            )
+            _log_failed_login(safe_name, ip_key, request)
             return JSONResponse({"error": "invalid username or password"}, status_code=401)
 
         epoch = row["session_epoch"] or ""
+    finally:
+        # Released here rather than by `async with`: `asyncio.Semaphore` tracks
+        # no ownership, so leaving the block via the 401 return above would
+        # release a second time on `__aexit__` and grant a slot that does not
+        # exist. `acquire` is the only thing that can still be in flight at the
+        # 429 above, and a cancelled acquire leaks nothing.
+        _login_slots.release()
 
     auth.throttle.record_success(ip_key)
     auth.throttle.record_success(user_key)
@@ -222,7 +398,38 @@ async def auth_login(body: LoginBody, request: Request) -> JSONResponse:
 
 
 @app.post("/api/auth/logout")
-def auth_logout() -> JSONResponse:
+def auth_logout(request: Request) -> JSONResponse:
+    """Sign out — everywhere, not just here.
+
+    Session tokens are stateless, so deleting the cookie only stops *this*
+    browser sending its copy: any other copy taken earlier stayed valid for the
+    rest of its seven days, which made "Sign out" a gesture rather than a
+    revocation. Rotating the user's `session_epoch` is what actually revokes,
+    because every request compares the token's epoch against the stored one.
+
+    That is a deliberate trade with the sign-out itself: signing out here signs
+    out every device. The alternative — naming and revoking one session — needs
+    a server-side session table, which this design does not have.
+
+    The existing password hash is read back and rewritten unchanged.
+    `set_user` upserts the whole row, so passing anything else would silently
+    rewrite the password.
+    """
+    # The gate has already proved this cookie carries a session, so both checks
+    # below are unreachable while that holds. They are not removed because the
+    # cost of being wrong is a 500 on the sign-out button: if this path is ever
+    # made public, or the gate's notion of "signed in" ever widens, the handler
+    # still has to cope with there being nothing to revoke.
+    username = auth.session_username(request.cookies.get(auth.COOKIE_NAME))
+    if username:
+        row = db().get_user(username)
+        if row is not None:
+            # Before the cookie is cleared: if this raises, the request fails
+            # loudly and the cookie stays, rather than answering "ok" to a
+            # sign-out that revoked nothing.
+            db().set_user(username, row["password_hash"], auth.new_epoch())
+            db().log(f"logout: {username} (all sessions revoked)")
+
     response = JSONResponse({"ok": True})
     response.delete_cookie(auth.COOKIE_NAME, path="/")
     return response
@@ -246,6 +453,19 @@ async def vnc_websocket(websocket: WebSocket) -> None:
     desktop that is logged into Goodreads has no exposed port of its own and
     inherits this app's session check.
     """
+    # Before the session check and before any `accept`, so a caller refused for
+    # its origin sees exactly what a caller refused for its session sees —
+    # `close(1008)` — and the handshake cannot be used to tell the two apart.
+    origin = websocket.headers.get("origin", "")
+    if _refused_origin(origin, websocket.headers.get("host", "")):
+        if auth.session_username(websocket.cookies.get(auth.COOKIE_NAME)):
+            db().log(
+                f"refused a cross-origin VNC handshake from {origin}",
+                level="warning",
+            )
+        await websocket.close(code=1008)  # policy violation
+        return
+
     if not auth.session_username(websocket.cookies.get(auth.COOKIE_NAME)):
         await websocket.close(code=1008)  # policy violation
         return
@@ -397,6 +617,17 @@ def version_history() -> dict:
 @app.on_event("startup")
 def _startup() -> None:
     db()
+    # The umask set at package import covers everything created from here on,
+    # but a deployment that has been running already has a database, its
+    # sidecars and a session file at the mode they were made with. Logged only
+    # when something actually changed, so this is one line on the first start
+    # after an upgrade rather than one on every start.
+    tightened = harden_data_dir(settings.data_dir)
+    if tightened:
+        db().log(
+            f"tightened permissions on {', '.join(tightened)} — these were "
+            f"readable by other accounts on the host"
+        )
     # A stage added after a book was created has no row for it; without this
     # that stage would silently never record a result.
     db().ensure_stages()
@@ -1328,6 +1559,19 @@ class CredentialBody(BaseModel):
 
 @app.put("/api/settings")
 def put_settings(body: CredentialBody) -> dict:
+    """Store the credentials sent, deleting the ones sent empty.
+
+    The whole body is checked before anything is written. `set_credential` is
+    an unconditional upsert and the loop below iterates the request body
+    directly, so without this any key a caller cared to invent became a row in
+    the `credentials` table — and because the writes are sequential, a body
+    that was going to be rejected partway through could still have deleted a
+    real credential on its way to the failure.
+    """
+    unknown = sorted(set(body.values) - _CREDENTIAL_KEYS)
+    if unknown:
+        raise HTTPException(400, f"unknown credential key(s): {', '.join(unknown)}")
+
     saved = []
     for key, value in body.values.items():
         if value == "":
@@ -1341,19 +1585,24 @@ def put_settings(body: CredentialBody) -> dict:
 
 @app.post("/api/settings/test/{service}")
 def test_service(service: str) -> dict:
+    """Test one service's credentials.
+
+    Runs the same authenticated probe the background health check runs, rather
+    than the client's own `health()`. Every `health()` route these clients have
+    is unauthenticated — Kavita `/api/health`, BookLore `/api/v1/healthcheck`,
+    Audiobookshelf `/status`, Open Notebook `/api/config`, Shelfmark
+    `/api/health` — so Test used to answer "ok" to a wrong API key: a green
+    tick in the panels beside a red banner naming the same service, with
+    nothing to say which one to believe. `probe` owns the per-service choice of
+    call and the error handling, and closes the client itself.
+    """
+    from .health import probe
+
     factory = SERVICE_FACTORIES.get(service)
     if factory is None:
         raise HTTPException(404, f"unknown service {service}")
-    client = factory()
-    try:
-        detail = client.health()
-        return {"ok": True, "detail": detail}
-    except ClientError as exc:
-        return JSONResponse({"ok": False, "detail": str(exc)}, status_code=200)
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "detail": f"{type(exc).__name__}: {exc}"}, status_code=200)
-    finally:
-        client.close()
+    ok, detail, _kind = probe(service, factory)
+    return JSONResponse({"ok": ok, "detail": detail}, status_code=200)
 
 
 # --------------------------------------------------------------------------

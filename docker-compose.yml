@@ -26,7 +26,26 @@ services:
       # itself and its WebSocket is session-checked, so the browser that gets
       # logged into Goodreads has no port of its own. Change the host side if
       # 8091 is taken; uvicorn listens on 8090 in-container either way.
-      - "8091:8090"
+      #
+      # PUBLISH_HOST is the interface to publish on, defaulting to every one.
+      # It is interpolated from `.env` rather than set in
+      # docker-compose.override.yml for a concrete reason: `!override` does
+      # **not** work on `ports`. Compose's own port merge unions by
+      # (target, published, protocol) and ignores the tag, so an override that
+      # lists `100.64.0.1:8091:8090` ends up publishing BOTH that and this one
+      # — `docker compose config` shows two entries, and the port is open on
+      # every interface exactly as before. Verified against Compose v2.36.2;
+      # `!override` does work on ordinary fields like `command`. A variable
+      # yields one entry either way, so there is nothing to merge.
+      #
+      # Narrowing it is worth doing and easy to get wrong: a binding to one
+      # address answers only on that address, so a value the front end does not
+      # dial turns every request into a 502. Confirm the target first — the
+      # left-hand address in `docker compose logs goodreads | grep 'GET /login'`
+      # is where the front end reaches this app from, and a proxy running in a
+      # *container* arrives as its bridge gateway (172.x.0.1), never as
+      # 127.0.0.1. See .env.example for the full note.
+      - "${PUBLISH_HOST:-0.0.0.0}:8091:8090"
     volumes:
       # Placeholders, so a clone runs without editing this file. Point them at
       # your real library in docker-compose.override.yml — see
@@ -43,6 +62,59 @@ services:
       retries: 3
       start_period: 30s
     restart: unless-stopped
+
+    # --- container hardening (Tier 1: this container still runs as root) ---
+    #
+    # `no-new-privileges` is here for `su`, `passwd` and `mount`, which Ubuntu
+    # jammy still ships setuid. Nothing in this image needs setuid and nothing
+    # here has any reason to gain privileges after starting. It is *not* here
+    # for Chromium's sandbox helper — `chrome_sandbox` is mode 0777 in this
+    # image rather than setuid, so this flag does not touch it either way.
+    security_opt:
+      - no-new-privileges:true
+
+    # Measured on a live deployment rather than guessed. Docker counts
+    # *tasks*, and Chromium is thread-heavy, so the number that matters is the
+    # peak while the interactive login browser is open — the one thing here
+    # that spawns hundreds of threads:
+    #
+    #     idle                       12
+    #     login browser open        157
+    #
+    # 512 is a little over three times that peak. A cap set too low does not
+    # fail loudly: it appears as an intermittent `fork: Resource temporarily
+    # unavailable` when Chromium launches, which is very easy to misread as a
+    # VNC fault. Before changing this, read /sys/fs/cgroup/pids.current while a
+    # login is open and take roughly twice what you see.
+    pids_limit: 512
+
+    # The capability set is empty but for the one uid 0 genuinely needs here,
+    # and DAC_OVERRIDE is not optional. A `/data` bind source owned by the host
+    # user's uid (1000) means that with CapEff cleared uid 0 falls through
+    # owner (1000 != 0) and group (1000 != 0) to `other`, which is r-x — writes
+    # then fail, and they fail *after a restart*, which is the expensive moment
+    # to find out. What that would break: SQLite's -wal/-shm creation and
+    # cleanup, `mkdir /data/browser-profile`, Playwright's storage_state()
+    # write, and every destination.parent.mkdir under /books.
+    #
+    # Dropping the rest removes NET_RAW, SETUID, SETGID, CHOWN, FOWNER, KILL,
+    # MKNOD, SYS_CHROOT and SETFCAP, none of which this app uses. Dropping
+    # *everything* without the DAC_OVERRIDE add-back is the version of this
+    # that breaks the service.
+    #
+    # Deliberately not added: `read_only: true`. Xvfb and Chromium both write
+    # to /tmp, so it needs tmpfs mounts on /tmp and /dev/shm with them — the
+    # largest regression risk here for the least additional benefit.
+    #
+    # Also deliberately kept: `--no-sandbox` in app/login.py. Docker's default
+    # seccomp profile can block the namespace sandbox regardless, and losing it
+    # breaks the interactive login, which is the only path to a Goodreads
+    # session.
+    cap_drop:
+      - ALL
+    cap_add:
+      - DAC_OVERRIDE
+
     # Services that keep to their own isolated docker network, and hosts whose
     # firewall blocks container -> host published ports, both require joining
     # them by name. Add your own networks in docker-compose.override.yml.

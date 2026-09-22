@@ -314,13 +314,58 @@ def has_media(path: Path, exts: set[str]) -> bool:
     )
 
 
+#: What a category or author folder created for the library should end up as.
+#:
+#: The process runs under `umask 0o077` (see `app/permissions.py`) so that
+#: everything written into the data volume is owner-only without anyone having
+#: to remember. The media library is the opposite case: it exists to be read by
+#: other applications, which are separate containers with their own uid, so a
+#: directory made owner-only would make every book beneath it unindexable —
+#: and that failure is silent, because the app itself can still read its own
+#: tree. This is the mode such a directory had before the umask changed
+#: (`0o777 & ~0o022`), so nothing about the library's accessibility moves.
+LIBRARY_DIR_MODE = 0o755
+
+
+def makedirs_for_library(path: Path) -> None:
+    """`mkdir -p`, leaving every level it created reachable by the other apps.
+
+    Every *missing* level is corrected, not just the leaf. `mkdir(parents=True)`
+    creates the whole chain — `books_root/<Category>/<Author - Title (Year)>/` —
+    and the levels above the destination are as load-bearing as the destination
+    itself: a book in a readable folder inside an unreadable one is a book no
+    other service can find.
+
+    Levels that already existed are left exactly as they are, mode included,
+    because a folder the operator set up deliberately is not this code's to
+    change.
+    """
+    missing: list[Path] = []
+    probe = path
+    while not probe.exists():
+        missing.append(probe)
+        if probe.parent == probe:  # reached the root; nothing left to walk
+            break
+        probe = probe.parent
+
+    path.mkdir(parents=True, exist_ok=True)
+
+    for created in missing:
+        try:
+            os.chmod(created, LIBRARY_DIR_MODE)
+        except OSError:
+            # Best effort. The alternative — refusing to place the book — would
+            # turn a permissions oddity into a stalled library.
+            pass
+
+
 def move_into_place(source: Path, destination: Path) -> Path:
     """Move `source` to `destination` with a same-filesystem rename.
 
     Returns the final path. Raises if the move would cross a device, because
     that would mean copying — the thing this design forbids.
     """
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    makedirs_for_library(destination.parent)
     final = destination
     if final.exists():
         # Never clobber. If the same content is already there we are done;

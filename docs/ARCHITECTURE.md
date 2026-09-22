@@ -443,29 +443,84 @@ The virtual display is four packages: `xvfb`, `x11vnc`, `novnc` and `procps`
 - `x11vnc` serves that display on port 5900 with `-localhost -nopw -forever
   -shared`. `-localhost` is load-bearing: it binds the RFB socket to loopback
   inside the container, so the authenticated bridge in the app is the only way
-  in. The script verifies the bind actually took rather than trusting the
-  flags (`docker/start-vnc.sh:38-54`).
-- `websockify` is deliberately **not** installed. noVNC's static client is
-  served by the app itself at `/vnc/{asset:path}` out of `/usr/share/novnc`
-  (`app/main.py:280-292`), and the RFB traffic is carried over
-  `/vnc/ws`, a WebSocket that closes with policy code 1008 before
-  authentication and otherwise pumps bytes both ways between the browser and
-  `127.0.0.1:5900` (`app/main.py:218-278`).
+  in (`docker/start-vnc.sh:38-46`). The script then *tries* to confirm the bind
+  with `ss` (`docker/start-vnc.sh:48`), but `iproute2` is not installed in this
+  image, so that branch is skipped and has never run. **The flags are the
+  control.** Reading that check as evidence would be a false comfort; install
+  `iproute2` if you want the confirmation to be real.
+- `websockify` is **installed and never started**. It arrives as a hard
+  dependency of `novnc` on jammy, so purging it takes noVNC with it — and
+  `/usr/share/novnc` is exactly what `/vnc/{asset}` serves, so the login desktop
+  would go blank. The Dockerfile comment at that point says so as a warning, not
+  as a statement that the package is absent (`Dockerfile:17-20`).
+  noVNC's static client is served by the app itself at `/vnc/{asset:path}` out
+  of `/usr/share/novnc` (`app/main.py:521`), and the RFB traffic is carried over
+  `/vnc/ws`, a WebSocket that checks the request's **origin** first and its
+  session cookie second, closing with policy code 1008 for either before
+  accepting, and otherwise pumps bytes both ways between the browser and
+  `127.0.0.1:5900` (`app/main.py:446`).
 
 The startup command starts the display first and then `exec`s uvicorn, so a
 headless failure never stops the service from coming up — `start-vnc.sh` is
 best-effort and guarded at every step (`Dockerfile:44-46`,
 `docker/start-vnc.sh:1-10`).
 
-`docker-compose.yml` publishes exactly one port, `8091:8090`. The container
-listens on 8090 and the app's own `PORT` default matches; the host side is 8091
-only because 8090 is already taken on this machine by an unrelated service.
-Nothing else is exposed: the VNC desktop has no port of its own, which is the
-point. It was previously a real hole — noVNC published on `0.0.0.0:6080` would
-have let anyone on the LAN drive a browser logged into a personal account.
+`docker-compose.yml` publishes exactly one port, into which `PUBLISH_HOST` is
+interpolated: `"${PUBLISH_HOST:-0.0.0.0}:8091:8090"`. The container listens on
+8090 and the app's own `PORT` default matches; the host side is 8091 only
+because 8090 is already taken on this machine by an unrelated service. Nothing
+else is exposed: the VNC desktop has no port of its own, which is the point. It
+was previously a real hole — noVNC published on `0.0.0.0:6080` would have let
+anyone on the LAN drive a browser logged into a personal account.
+
+Left unset, `PUBLISH_HOST` binds every interface, and that is more exposed than
+it sounds: a published port is **not** covered by ufw, because docker's own
+iptables rules are evaluated before the firewall's. The app itself has no say in
+this — it is a compose-level binding, which is why it is a variable rather than
+a `docker-compose.override.yml` entry (`ports: !override:` does not work; see
+[SECURITY.md](SECURITY.md)).
+
+Narrowing it is worth doing and easy to get wrong, because the value has to
+match where the front end dials *from*: a proxy or tunnel in a container reaches
+a host-published port as its bridge gateway (`172.x.0.1`), so `127.0.0.1` serves
+only a proxy running directly on the host. The app logs the address to compare
+against — `docker compose logs goodreads | grep 'GET /login'`. Set it wrongly
+and nothing reaches this app at all, so its own logs stay empty and the 502
+appears to come from nowhere.
 
 The container's healthcheck is an unauthenticated `GET /api/health`, so the
-probe does not need a session (`docker-compose.yml:38-44`, `app/main.py:109-112`).
+probe does not need a session (`docker-compose.yml`, `app/main.py:237`).
+
+### Container hardening
+
+Four settings in `docker-compose.yml`, and the container deliberately still runs
+as **root** — dropping that is a separate migration, not a config line, because
+it needs a chown of the database, its WAL, the auth state file and the whole
+Chromium profile.
+
+- `security_opt: no-new-privileges:true` — jammy still ships setuid `su`,
+  `passwd` and `mount`, and nothing here needs to gain privileges after
+  starting. This is *not* about Chromium's sandbox helper: `chrome_sandbox` is
+  mode 0777 in this image, not setuid.
+- `pids_limit: 512` — measured, not guessed. Idle is 12 tasks; the peak with the
+  interactive login browser open is 157, because Docker counts tasks and
+  Chromium is thread-heavy. A cap set too low does not fail loudly: it shows up
+  as an intermittent `fork: Resource temporarily unavailable` when Chromium
+  launches, which reads like a VNC fault.
+- `cap_drop: [ALL]` with `cap_add: [DAC_OVERRIDE]` — and the add-back is
+  load-bearing rather than a rounding error. The `/data` bind source is owned by
+  the host user's uid (1000), so with `CapEff` cleared uid 0 falls through owner
+  (1000≠0) and group (1000≠0) to `other`, which is r-x. Writes then fail, and
+  they fail *after a restart*: SQLite's `-wal`/`-shm`, `mkdir
+  /data/browser-profile`, Playwright's `storage_state()` write, and any
+  `destination.parent.mkdir` under `/books`.
+
+Deliberately not set: `read_only` (Xvfb and Chromium both write `/tmp`, so it
+needs `tmpfs` alongside — the largest regression risk for the least benefit) and
+`mem_limit` (host-dependent, so it belongs in the override). `--no-sandbox` in
+`app/login.py` stays for the same reason: Docker's default seccomp profile can
+block the namespace sandbox regardless, and losing it breaks the only path to a
+Goodreads session.
 
 Volume mounts, in the app's own vocabulary (`docker-compose.yml:35-37` — those
 sources are relative placeholders, and the override supplies the real host

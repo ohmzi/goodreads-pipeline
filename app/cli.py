@@ -30,6 +30,7 @@ from .pathing import (
     AUDIO_EXTS,
     is_junk,
     is_media_file,
+    makedirs_for_library,
     move_into_place,
     sanitize_component,
 )
@@ -163,7 +164,13 @@ def cmd_rename(args: argparse.Namespace) -> int:
     print("\nApplying...\n")
     applied = 0
     for source, destination, _why in moves:
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        # Through the same helper `move_into_place` uses, and not a bare
+        # `mkdir`: the process runs under `umask 0o077` (app/permissions.py),
+        # so a raw mkdir creates the new author folder owner-only — and
+        # Audiobookshelf is a different container with its own uid, so every
+        # audiobook moved into it would vanish from ABS and never index. It
+        # fails silently, because this process can still read its own tree.
+        makedirs_for_library(destination.parent)
         if destination.exists():
             print(f"  skip (exists): {destination.relative_to(root)}")
             continue
@@ -640,6 +647,37 @@ def cmd_reconcile(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------
+# goodreads session
+# --------------------------------------------------------------------------
+def cmd_forget_session(args: argparse.Namespace) -> int:  # noqa: ARG001
+    """Delete the stored Goodreads session and say what went.
+
+    The state file is the most valuable thing this app writes — a live session
+    for a real account, in the clear, on a volume — and until now the only way
+    to remove it was to know which file it was and delete it by hand. The
+    browser profile carries the same cookies, so both are removed; see
+    `login.forget_stored_session`.
+    """
+    from .login import forget_stored_session
+
+    result = forget_stored_session()
+    if not result["ok"]:
+        print(result["message"], file=sys.stderr)
+        return 2
+
+    removed = result["removed"]
+    if removed:
+        print("removed: " + ", ".join(removed))
+    else:
+        print("nothing stored — there was no Goodreads session to remove.")
+    print(
+        "\nThe next sign-in on the Goodreads page starts a fresh browser; the "
+        "old session cannot be resumed."
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------
 # users
 # --------------------------------------------------------------------------
 def cmd_set_password(args: argparse.Namespace) -> int:
@@ -649,10 +687,28 @@ def cmd_set_password(args: argparse.Namespace) -> int:
     if not username:
         print("a username is required", file=sys.stderr)
         return 2
+    # Checked here, against the same constant the cipher uses, rather than by
+    # catching what the cipher raises: this branch is a documented exit 2, and
+    # letting a constructor's exception out would turn a clean refusal into a
+    # traceback for whoever ran the command. The start-up path deliberately
+    # does *not* validate — a deployment whose key is short must keep serving
+    # the credentials it already holds, not crash-loop under
+    # `restart: unless-stopped` while nobody is watching.
+    from .crypto import MIN_SECRET_LENGTH
+
     if not settings.secret_key:
         print(
             "GOODREADS_SECRET_KEY is not set — sessions cannot be signed. Set it "
             "in .env first.",
+            file=sys.stderr,
+        )
+        return 2
+    if len(settings.secret_key) < MIN_SECRET_LENGTH:
+        print(
+            f"GOODREADS_SECRET_KEY is shorter than {MIN_SECRET_LENGTH} characters. "
+            f"Nothing stretches it before use, so it is exactly as strong as the "
+            f"string in .env — replace it with the output of:\n"
+            f"  python -c \"import secrets; print(secrets.token_urlsafe(48))\"",
             file=sys.stderr,
         )
         return 2
@@ -1166,6 +1222,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     recon.add_argument("--apply", action="store_true", help="queue drifted shelf moves for retry")
     recon.set_defaults(func=cmd_reconcile)
+
+    forget = sub.add_parser(
+        "forget-session",
+        help="delete the stored Goodreads session (its cookies on the data volume)",
+    )
+    forget.set_defaults(func=cmd_forget_session)
 
     delete = sub.add_parser("delete-user", help="remove a login")
     delete.add_argument("username")

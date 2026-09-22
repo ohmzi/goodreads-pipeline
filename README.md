@@ -150,6 +150,15 @@ chmod 600 .env
 docker compose up -d --build
 ```
 
+**Set `PUBLISH_HOST` in `.env` before you start.** Left unset, the port is
+published on every interface, and a published port is *not* covered by ufw —
+docker's iptables rules are evaluated before the firewall's. Point it at a VPN
+interface, one LAN address, or `127.0.0.1` behind a proxy:
+
+```
+PUBLISH_HOST=127.0.0.1
+```
+
 Create a login, then open `http://<host>:8091`:
 
 ```bash
@@ -187,11 +196,20 @@ python -m app.cli backfill-genres   # re-resolve genres and re-categorise
 
 Passwords are hashed with scrypt and compared in constant time. Sessions are
 stateless HMAC-SHA256 tokens carrying a password epoch, so changing a password
-evicts every outstanding session. Failed logins are throttled by username _and_
-client address with a progressive delay rather than a lockout, so nobody can
-shut the owner out of their own UI. The noVNC desktop has no published port:
-x11vnc binds to loopback inside the container and the app bridges to it over a
-session-checked WebSocket, leaving `8091` as the only way in.
+evicts every outstanding session — and so does **signing out**, on every device
+at once. Failed logins are throttled by username _and_ client address with a
+progressive delay rather than a lockout, so nobody can shut the owner out of
+their own UI. Every credential is Fernet-encrypted at rest behind a
+`GOODREADS_SECRET_KEY` that must be at least 32 characters, and the data volume
+is kept owner-only by a `umask 077` plus a one-off tighten at startup. Requests
+from another site are refused on the server, not only by `SameSite`, and the
+calls the app makes to your other services refuse redirects, cap response
+bodies, and withhold error bodies from anything that carried a credential.
+
+The noVNC desktop has no published port: x11vnc binds to loopback inside the
+container and the app bridges to it over a WebSocket that checks both the
+origin and the session, leaving the one published port as the only way in —
+which is why `PUBLISH_HOST` matters.
 
 > ⚠️ The threat model, credential storage design, reverse-proxy deployment, and
 > an explicit list of known limits — including that the session cookie is a

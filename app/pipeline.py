@@ -76,6 +76,16 @@ SWEEP_BUDGET_SECONDS = 120
 #: cause is findable rather than mysterious.
 SWEEP_WARN_SECONDS = 300
 
+#: Budget a periodic phase must have left to be worth starting. The three
+#: together take about half a minute against live services — measured on the
+#: real deployment: reconcile 25s over 255 shelf records, discover 6s over a
+#: 92-book shelf, check_all 0.5s — so this leaves room for the slowest of them
+#: and skips all three only when a sweep is already nearly out of time.
+#:
+#: A phase already running cannot be interrupted. The only bound available is
+#: on starting one, which is why this is a *reserve* rather than a timeout.
+_PHASE_RESERVE_SECONDS = 40.0
+
 #: How long a service may be transiently broken before its failures become a
 #: book's problem. A full day covers an upstream outage or a quota that resets
 #: daily, which is the realistic worst case here.
@@ -115,6 +125,31 @@ class Scheduler:
         self._last_health = 0.0
         self._last_reconcile = 0.0
         self.last_result: dict = {}
+        #: Books currently inside `_advance`, wherever that is happening. A
+        #: sweep that runs out of budget stops *waiting* but cannot stop the
+        #: worker it left behind, so the next sweep has to know which books are
+        #: still in someone's hands. Without this it would submit the same book
+        #: again and two stage runs would write the same row.
+        self._in_flight: set[int] = set()
+        self._in_flight_lock = threading.Lock()
+        #: Owned by the scheduler rather than by a sweep, so a sweep can return
+        #: without joining work it has stopped waiting for. See `_sweep`.
+        self._pool: concurrent.futures.ThreadPoolExecutor | None = None
+
+    @property
+    def _executor(self) -> concurrent.futures.ThreadPoolExecutor:
+        """The worker pool, created on first use.
+
+        Not created in `__init__` because a `ThreadPoolExecutor` starts no
+        threads until something is submitted, and not created per sweep because
+        `ThreadPoolExecutor.__exit__` calls `shutdown(wait=True)` — which is
+        what made this budget advisory rather than real.
+        """
+        if self._pool is None:
+            self._pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=ADVANCE_WORKERS, thread_name_prefix="goodreads-adv"
+            )
+        return self._pool
 
     # -- lifecycle -------------------------------------------------------
     def start(self) -> None:
@@ -128,6 +163,12 @@ class Scheduler:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=5)
+        if self._pool is not None:
+            # Not waited on: a sweep is allowed to leave a book mid-advance,
+            # and shutting down is the same situation. Queued work is dropped
+            # and picked up by the next sweep, which finds it still pending.
+            self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
 
     def _loop(self) -> None:
         while not self._stop.is_set():
@@ -148,14 +189,38 @@ class Scheduler:
 
     def _sweep(self, force_discover: bool) -> dict:
         summary = {"discover": None, "advanced": 0, "parked": 0, "held": 0,
-                   "books": 0, "health": None, "breaker": {}}
+                   "books": 0, "health": None, "breaker": {}, "in_flight": 0,
+                   "abandoned": 0, "skipped": []}
 
-        now = time.time()
+        # The clock starts here, not at the book loop below. The three periodic
+        # phases are plain synchronous calls that together take about half a
+        # minute against live services, and they used to run entirely outside
+        # the budget — so `seconds` below was never the time this sweep took,
+        # and a phase was free to overrun by however much it liked.
+        started = time.time()
+        now = started
+
+        def remaining() -> float:
+            return SWEEP_BUDGET_SECONDS - (time.time() - started)
+
+        def take_phase(name: str) -> bool:
+            """Claim the right to start a periodic phase, or record the skip.
+
+            An already-running phase cannot be interrupted, so the only bound
+            available is on starting one. No timer is updated when a phase is
+            skipped, so nothing is lost: it is still due, and the next sweep
+            tries again a few minutes later.
+            """
+            if remaining() > _PHASE_RESERVE_SECONDS:
+                return True
+            summary["skipped"].append(name)
+            return False
 
         # Credential checks run independently of book work, so a service that
         # starts rejecting auth is visible within minutes rather than whenever
         # a book next happens to touch that stage.
-        if force_discover or (now - self._last_health) > HEALTH_INTERVAL_SECONDS:
+        health_due = force_discover or (now - self._last_health) > HEALTH_INTERVAL_SECONDS
+        if health_due and take_phase("health"):
             self._last_health = now
             try:
                 from .health import check_all
@@ -174,7 +239,8 @@ class Scheduler:
         except Exception as exc:  # noqa: BLE001
             db().log(f"breaker backlog adoption failed: {exc}", level="error")
 
-        if force_discover or (now - self._last_discover) > DISCOVER_INTERVAL_SECONDS:
+        discover_due = force_discover or (now - self._last_discover) > DISCOVER_INTERVAL_SECONDS
+        if discover_due and take_phase("discover"):
             self._last_discover = now
             try:
                 summary["discover"] = discover.run()
@@ -191,7 +257,8 @@ class Scheduler:
         # Compare our shelf records against Goodreads and queue a retry for
         # anything that has drifted. Runs on its own so drift is caught without
         # anyone noticing it first.
-        if force_discover or (now - self._last_reconcile) > RECONCILE_INTERVAL_SECONDS:
+        reconcile_due = force_discover or (now - self._last_reconcile) > RECONCILE_INTERVAL_SECONDS
+        if reconcile_due and take_phase("reconcile"):
             self._last_reconcile = now
             try:
                 from .reconcile import reconcile
@@ -206,7 +273,6 @@ class Scheduler:
         # re-trying the same head of the list.
         books = db().list_books()
         books.sort(key=_last_touched)
-        started = time.time()
         spent = 0
 
         # One snapshot of "which services are held" for the whole sweep, passed
@@ -215,48 +281,84 @@ class Scheduler:
 
         # Advance several books concurrently: the stages are I/O-bound, and a
         # serial sweep spent its whole budget on one slow search.
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=ADVANCE_WORKERS, thread_name_prefix="goodreads-adv"
-        ) as pool:
-            pending = {}
-            queue = iter(books)
-            while True:
-                over_budget = (time.time() - started) >= SWEEP_BUDGET_SECONDS
-                while not over_budget and len(pending) < ADVANCE_WORKERS:
-                    try:
-                        book = next(queue)
-                    except StopIteration:
-                        break
-                    pending[pool.submit(self._advance, book, holding)] = book
-                    over_budget = (time.time() - started) >= SWEEP_BUDGET_SECONDS
-
-                if not pending:
+        #
+        # The pool is the scheduler's and is deliberately *not* entered as a
+        # context manager. `ThreadPoolExecutor.__exit__` calls
+        # `shutdown(wait=True)`, so every break out of the loop below was
+        # followed by a wait for six in-flight books anyway — measured on the
+        # live deployment, sweeps that broke out at the 2x ceiling still ended
+        # at 310-432s against a 120s budget. Outliving the sweep is what makes
+        # the budget real, and `_in_flight` is what makes it safe.
+        pool = self._executor
+        pending = {}
+        queue = iter(books)
+        while True:
+            over_budget = (time.time() - started) >= SWEEP_BUDGET_SECONDS
+            while not over_budget and len(pending) < ADVANCE_WORKERS:
+                try:
+                    book = next(queue)
+                except StopIteration:
                     break
-
-                done, _ = concurrent.futures.wait(
-                    pending, return_when=concurrent.futures.FIRST_COMPLETED
+                if not self._claim(book["id"]):
+                    # Still being advanced by the sweep that gave up waiting
+                    # for it. Submitting it again would put two stage runs on
+                    # one book, writing the same row twice.
+                    summary["in_flight"] += 1
+                    continue
+                try:
+                    future = pool.submit(self._advance, book, holding)
+                except RuntimeError:
+                    # `submit` refuses once the pool is shut down, and can also
+                    # fail to start a thread. The claim above must be given back
+                    # by hand here, because the done-callback that normally
+                    # releases it belongs to a future that was never created —
+                    # without this the book stays in `_in_flight` for the life
+                    # of the process and every later sweep silently skips it.
+                    self._release(book["id"])
+                    raise
+                future.add_done_callback(
+                    lambda _future, book_id=book["id"]: self._release(book_id)
                 )
-                for future in done:
-                    book = pending.pop(future)
-                    summary["books"] += 1
-                    try:
-                        outcome, used = future.result()
-                    except Exception as exc:  # noqa: BLE001 - one book must not end the sweep
-                        db().log(f"advance crashed for {book.get('title', '?')[:40]}: {exc}",
-                                 level="error", book_id=book.get("id"))
-                        continue
-                    spent += used
-                    if outcome == "advanced":
-                        summary["advanced"] += 1
-                    elif outcome == "parked":
-                        summary["parked"] += 1
-                    elif outcome == "held":
-                        summary["held"] += 1
+                pending[future] = book
+                over_budget = (time.time() - started) >= SWEEP_BUDGET_SECONDS
 
-                if (time.time() - started) >= SWEEP_BUDGET_SECONDS and not pending:
-                    break
-                if (time.time() - started) >= SWEEP_BUDGET_SECONDS * 2:
-                    break
+            if not pending:
+                break
+
+            # Bounded, so one wedged book cannot hold the sweep open. With no
+            # timeout this waited on the slowest worker indefinitely, and the
+            # budget checks below were never reached at all.
+            done, _ = concurrent.futures.wait(
+                pending,
+                timeout=max(1.0, remaining()),
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            for future in done:
+                book = pending.pop(future)
+                summary["books"] += 1
+                try:
+                    outcome, used = future.result()
+                except Exception as exc:  # noqa: BLE001 - one book must not end the sweep
+                    db().log(f"advance crashed for {book.get('title', '?')[:40]}: {exc}",
+                             level="error", book_id=book.get("id"))
+                    continue
+                spent += used
+                if outcome == "advanced":
+                    summary["advanced"] += 1
+                elif outcome == "parked":
+                    summary["parked"] += 1
+                elif outcome == "held":
+                    summary["held"] += 1
+
+            if (time.time() - started) >= SWEEP_BUDGET_SECONDS and not pending:
+                break
+            if (time.time() - started) >= SWEEP_BUDGET_SECONDS * 2:
+                break
+
+        # Whatever is still running belongs to no one now. These stay in
+        # `_in_flight` until their own callback fires, so the next sweep skips
+        # them rather than starting a second run of the same book.
+        summary["abandoned"] = len(pending)
 
         elapsed = time.time() - started
         summary["stages_run"] = spent
@@ -276,6 +378,30 @@ class Scheduler:
             )
         self.last_result = summary
         return summary
+
+    def _claim(self, book_id: int) -> bool:
+        """Take a book for advancing, unless someone already has it.
+
+        Returns False when the book is already being advanced — which happens
+        exactly when an earlier sweep ran out of budget and left the worker
+        running. See `_in_flight`.
+        """
+        with self._in_flight_lock:
+            if book_id in self._in_flight:
+                return False
+            self._in_flight.add(book_id)
+            return True
+
+    def _release(self, book_id: int) -> None:
+        """Give a book back once its worker has actually finished.
+
+        Wired up as a future callback rather than called from the sweep's own
+        loop, because a sweep that stopped waiting is precisely the case this
+        has to keep working for: the callback fires when the worker ends,
+        whether or not anybody is still watching.
+        """
+        with self._in_flight_lock:
+            self._in_flight.discard(book_id)
 
     def _advance(self, book: dict, holding: dict | None = None) -> tuple[str, int]:
         """Run every stage of one book that is ready to run.

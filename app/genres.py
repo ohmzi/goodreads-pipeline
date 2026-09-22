@@ -36,6 +36,16 @@ from .config import settings
 TIMEOUT = httpx.Timeout(20.0, connect=8.0)
 UA = {"User-Agent": "goodreads/0.1 (personal library manager)"}
 
+#: Largest XML document read out of an epub, in bytes. `ZipInfo.file_size` is
+#: what the archive declares about itself, and a corrupt or hostile one can
+#: declare — or hide behind — a great deal. This is the bound on what gets
+#: pulled into memory and handed to a parser.
+MAX_OPF_BYTES = 1024 * 1024
+
+
+class _UnreadableEntry(Exception):
+    """A zip entry that is larger than `MAX_OPF_BYTES`, or carries entities."""
+
 #: OpenLibrary subjects are folksonomy, not a controlled vocabulary, so they
 #: arrive with a lot of noise — "nyt:hardcover-fiction=2021-05-23" and friends
 #: would otherwise substring-match a `fiction` rule and drag books to Fiction.
@@ -147,8 +157,8 @@ def _from_embedded(book: dict, file_path: str | None) -> list[str]:
             opf_name = _opf_path(archive)
             if not opf_name:
                 return []
-            root = ET.fromstring(archive.read(opf_name))
-    except (zipfile.BadZipFile, KeyError, ET.ParseError, OSError):
+            root = ET.fromstring(_read_entry(archive, opf_name, MAX_OPF_BYTES))
+    except (zipfile.BadZipFile, KeyError, ET.ParseError, OSError, _UnreadableEntry):
         return []
 
     subjects: list[str] = []
@@ -161,11 +171,37 @@ def _from_embedded(book: dict, file_path: str | None) -> list[str]:
     return subjects
 
 
+def _read_entry(archive: zipfile.ZipFile, name: str, limit: int) -> bytes:
+    """Read one XML entry from an epub, refusing an oversized or entity-bearing one.
+
+    Shared by `META-INF/container.xml` and the package document it points at,
+    because both are XML that arrives inside a downloaded file and neither is
+    more trustworthy than the other — guarding only the OPF would leave the
+    smaller file in front of it unguarded.
+
+    The size is taken from `ZipInfo` *before* reading, and there is deliberately
+    no branch for "read and then notice it was too long": `zipfile` clamps a
+    read to the size the central directory declares, so such a branch could
+    never fire. `<!ENTITY` is what is refused, not `<!DOCTYPE` — a bare DOCTYPE
+    is ordinary in the OPF files this has to keep accepting, and rejecting it
+    would fail books that parse perfectly well today.
+    """
+    info = archive.getinfo(name)
+    if info.file_size > limit:
+        raise _UnreadableEntry(f"{name} is {info.file_size} bytes, over the {limit} cap")
+    data = archive.read(name)
+    if b"<!ENTITY" in data:
+        raise _UnreadableEntry(f"{name} defines XML entities")
+    return data
+
+
 def _opf_path(archive: zipfile.ZipFile) -> str:
     """Resolve the OPF package document via META-INF/container.xml."""
     try:
-        container = ET.fromstring(archive.read("META-INF/container.xml"))
-    except (KeyError, ET.ParseError):
+        container = ET.fromstring(
+            _read_entry(archive, "META-INF/container.xml", MAX_OPF_BYTES)
+        )
+    except (KeyError, ET.ParseError, _UnreadableEntry):
         return ""
     for node in container.iter():
         if node.tag.endswith("rootfile") and node.get("full-path"):

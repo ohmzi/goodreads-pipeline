@@ -27,7 +27,10 @@ if str(ROOT) not in sys.path:
 
 _TMP = Path(tempfile.mkdtemp(prefix="goodreads-tests-"))
 os.environ["DATA_DIR"] = str(_TMP)
-os.environ["GOODREADS_SECRET_KEY"] = "test-secret-not-a-real-key"
+# Long enough to clear `crypto.MIN_SECRET_LENGTH`, because a key under it is
+# refused at first use — a suite running on a 26-character key would be
+# exercising a deployment shape that cannot start.
+os.environ["GOODREADS_SECRET_KEY"] = "test-secret-not-a-real-key-0123456789"
 os.environ["BOOKS_ROOT"] = str(_TMP / "books")
 os.environ["AUDIOBOOKS_ROOT"] = str(_TMP / "audiobooks")
 os.environ["GOODREADS_USER_ID"] = ""
@@ -60,6 +63,61 @@ def clean_db():
     for table in _TABLES:
         db().execute(f"DELETE FROM {table}")
     yield
+
+
+#: The one account a test signs in as. Named here rather than repeated in each
+#: module so a test that signs in by hand and a test that uses `signed_in`
+#: cannot drift onto different passwords and pass while testing nothing.
+OPERATOR = "operator"
+OPERATOR_PASSWORD = "a-test-password"
+
+
+@pytest.fixture
+def signed_in():
+    """A TestClient holding a valid session, without the app's startup hooks.
+
+    Deliberately not used as a context manager: entering one would run the
+    startup event, which starts the real sweep thread and the VNC browser. The
+    user is created first, so a test can also sign in by hand with `OPERATOR`
+    and `OPERATOR_PASSWORD` to exercise the login path itself.
+    """
+    from fastapi.testclient import TestClient
+
+    from app import auth
+    from app import main
+
+    db().set_user(OPERATOR, auth.hash_password(OPERATOR_PASSWORD), auth.new_epoch())
+    client = TestClient(main.app)
+    resp = client.post(
+        "/api/auth/login",
+        json={"username": OPERATOR, "password": OPERATOR_PASSWORD},
+    )
+    assert resp.status_code == 200, resp.text
+    return client
+
+
+@pytest.fixture
+def anonymous():
+    """A TestClient with no session and no way to get one."""
+    from fastapi.testclient import TestClient
+
+    from app import main
+
+    return TestClient(main.app)
+
+
+@pytest.fixture
+def fast_throttle(monkeypatch):
+    """A throttle that never sleeps, so a test can flood sign-ins quickly.
+
+    What is under test in those tests is the slot accounting and the feed, not
+    the delay — and the real delay doubles to eight seconds, which would make
+    twenty attempts take a minute.
+    """
+    from app import auth
+
+    monkeypatch.setattr(auth, "throttle", auth.LoginThrottle(free_attempts=10**9))
+    return auth.throttle
 
 
 class FakeClock:

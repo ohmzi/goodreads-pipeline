@@ -17,7 +17,7 @@ Secrets are split by lifetime:
 - Service credentials — API keys, usernames, passwords — are never environment
   variables. They are typed into the Settings page, encrypted with Fernet, and
   stored in the `credentials` table under a key derived from
-  `GOODREADS_SECRET_KEY` (`app/crypto.py:21-31`).
+  `GOODREADS_SECRET_KEY` (`app/crypto.py:19-26`).
 
 ## .env
 
@@ -47,6 +47,14 @@ from it:
 | `TRUST_PROXY` | nowhere | `0` |
 | `SHELFMARK_URL` … `SABNZBD_URL` | nowhere | container-name URLs |
 
+Two more are read by `docker compose` itself rather than by the app, so they
+belong in `.env` and are covered under *Operational gotchas* below:
+
+| Variable | What it decides | Default if unset |
+|---|---|---|
+| `PUBLISH_HOST` | Host address the UI is published on | every interface |
+| `PUBLIC_ORIGIN` | What the app is reached *as*, for the same-origin check | the request's own `Host` |
+
 `ABS_LIBRARY_ROOT` has no `.env.example` entry and no entry in the tracked
 compose file, so the code default applies until someone sets it. That default is
 the literal `/library/Audiobooks` (`app/config.py:63-67`), which is a placeholder
@@ -59,7 +67,7 @@ below.
 
 | Variable | Type | Default | Effect |
 |---|---|---|---|
-| `GOODREADS_SECRET_KEY` | string | empty | Signs session cookies (`app/auth.py:92-95`) and derives the Fernet key that encrypts the credentials table (`app/crypto.py:26-31`). Empty means `cipher()` and `_signing_key()` raise, so no credential can be stored and no session can be issued. Rotating it invalidates every stored credential and every outstanding session. |
+| `GOODREADS_SECRET_KEY` | string | empty | Signs session cookies (`app/auth.py:92-95`) and derives the Fernet key that encrypts the credentials table (`app/crypto.py:31-37`). Empty means `cipher()` and `_signing_key()` raise, so no credential can be stored and no session can be issued. Rotating it invalidates every stored credential and every outstanding session. |
 | `GOODREADS_USER_ID` | string | empty | The numeric Goodreads user id whose shelf is watched. Optional: `resolve_user_id` checks the `goodreads_user_id` row in `settings` first, then this variable, then detects the id from the saved browser session and stores it (`app/goodreads.py:102-130`). Set it only to override detection or to pin a specific profile. |
 
 ## Storage
@@ -90,8 +98,9 @@ Derived, not settable (`app/config.py:111-125`):
 | `BIND` | string | `0.0.0.0` | Read into `settings.bind`. Nothing in the app reads it back: uvicorn is started by the Dockerfile with a literal `--host 0.0.0.0` (`Dockerfile:46`). Inert unless the container command is changed. |
 | `PORT` | int | `8090` | Same: read into `settings.port`, never read back. The Dockerfile hardcodes `--port 8090` and `EXPOSE 8090` (`Dockerfile:42-46`). |
 | `AUTO_SHELVE_DEFAULT` | bool | `1` | Read into `settings.auto_shelve_default`, which nothing reads. The global switch is the `auto_shelve` row in `settings`, defaulting to `"1"` (`app/stages/shelve.py:34-35`, `app/stages/discover.py:60`) and toggled from the UI. |
-| `COOKIE_SECURE` | bool | `0` | Sets the `Secure` flag on the session cookie (`app/main.py:196`). See *Operational gotchas*. |
-| `TRUST_PROXY` | bool | `0` | Makes rate limiting use `X-Forwarded-For` instead of the socket peer (`app/main.py:120-133`). See *Operational gotchas*. |
+| `COOKIE_SECURE` | bool | `0` | Sets the `Secure` flag on the session cookie (`app/main.py:382`). See *Operational gotchas*. |
+| `TRUST_PROXY` | bool | `0` | Makes rate limiting use `X-Forwarded-For` instead of the socket peer (`app/main.py:252`). See *Operational gotchas*. |
+| `PUBLIC_ORIGIN` | string | empty | Compared against a request's `Origin` on state-changing requests and on the VNC handshake, in place of the request's own `Host` (`app/main.py:122`). Set it behind a proxy that rewrites `Host`. See *Operational gotchas*. |
 
 Parsing (`_env` and `_env_int` in `app/config.py:21-30`, and the `== "1"`
 boolean fields) is literal:
@@ -149,7 +158,7 @@ A missing credential is reported as `kind="auth"` rather than an outage, so it
 lands in the credentials group in the UI instead of being forgiven as a
 transient failure (`app/clients/base.py:60-73`). Losing `GOODREADS_SECRET_KEY`
 makes every row undecryptable and each one has to be re-entered; the error
-raised says so (`app/crypto.py:38-43`).
+raised says so (`app/crypto.py:38-50`).
 
 ## Library roots
 
@@ -194,6 +203,43 @@ addresses for login throttling come from `X-Forwarded-For` when this is on
 front to overwrite it, a client rotates the value on each attempt and the
 per-address throttle never fires, leaving only the per-username counter. Enable
 it when a reverse proxy you control rewrites the header, and not otherwise.
+
+**`PUBLISH_HOST` decides which of the host's addresses the UI answers on**, and
+getting it wrong is an outage rather than a warning. It is interpolated into the
+compose `ports:` mapping, so it is read by `docker compose` rather than by the
+app, and it lives in `.env` rather than `docker-compose.override.yml` because
+`ports: !override:` does not work: Compose merges port lists by
+`(target, published, protocol)` and ignores the tag, so an override publishes
+its mapping *and* the base file's (verified on Compose v2.36.2, which does honour
+`!override` on ordinary fields).
+
+Unset, the port is published on every interface — and a published port is
+**not** covered by ufw, because docker's iptables rules are evaluated before the
+firewall's. So narrowing is worth doing, and only after checking what the front
+end dials:
+
+```bash
+docker compose logs goodreads | grep 'GET /login'
+```
+
+The left-hand address is the front end. The trap: a proxy or tunnel running in a
+**container** reaches you as its bridge gateway (`172.x.0.1`), never as
+`127.0.0.1` — so `127.0.0.1` is correct only for a proxy running on the host
+itself, and a containerised one needs `0.0.0.0`. Set it wrongly and every
+request is refused before it reaches this app, so nothing appears in the app's
+own logs at all. See [SECURITY.md](SECURITY.md) and `.env.example`.
+
+This is also not what makes the app reachable from the internet: a tunnel in
+front reaches it whichever value is set. See *Reverse-proxy deployment* in
+[SECURITY.md](SECURITY.md).
+
+**`PUBLIC_ORIGIN` is required behind a proxy that rewrites `Host`.** The
+same-origin check on state-changing requests and on the VNC handshake compares a
+request's `Origin` against the host it was sent to (`app/main.py:122`). A proxy
+that terminates TLS on a public name and forwards to `goodreads:8090` makes
+those two disagree, so every such request is refused with 403 and the VNC panel
+never connects — with nothing on screen connecting that to the proxy. Set it to
+the origin a browser actually uses, scheme and port included, no trailing slash.
 
 **`BIND`, `PORT` and `AUTO_SHELVE_DEFAULT` do nothing** as shipped. The first
 two are overridden by the container command; the third is a dead read. Use the

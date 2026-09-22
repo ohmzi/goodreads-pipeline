@@ -29,6 +29,9 @@ from .base import ClientError, ServiceClient, cred
 class OpenNotebookClient(ServiceClient):
     name = "open notebook"
     base_url = settings.opennotebook_url
+    #: Every call carries the password itself as a bearer token. See
+    #: `ServiceClient.quotes_error_bodies`.
+    quotes_error_bodies = False
 
     def _auth(self) -> dict[str, str]:
         # Auth is disabled on this instance today, so an empty password simply

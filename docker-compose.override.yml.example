@@ -6,6 +6,19 @@
 #
 # Volumes, networks and environment entries merge by key, so an entry here
 # replaces the matching placeholder in docker-compose.yml.
+#
+# Two host-specific values do NOT belong here, for reasons that are not
+# obvious:
+#
+#   * The published port's bind address. Set `PUBLISH_HOST` in `.env` instead.
+#     `ports: !override:` looks like the right way to do it and is not: Compose
+#     merges port lists by (target, published, protocol) and ignores the tag,
+#     so the base file's entry stays published alongside yours and
+#     `docker compose config` shows two. A variable yields one entry either
+#     way. See the comment on `ports:` in docker-compose.yml.
+#   * `mem_limit`, if you want one. It is host-dependent, so it is not in the
+#     committed file; add it under `services.goodreads` here if your box needs
+#     it.
 
 services:
   goodreads:

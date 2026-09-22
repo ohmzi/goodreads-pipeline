@@ -1,0 +1,8 @@
+# Test-only dependencies. Not installed in the image — the container runs the
+# app, not the suite. Install with:
+#
+#     pip install -r requirements.txt -r requirements-dev.txt
+#
+# `pytest` is declared nowhere else, so without this file the suite under
+# `tests/` cannot be run from a fresh clone.
+pytest==8.3.5

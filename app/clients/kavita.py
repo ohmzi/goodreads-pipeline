@@ -16,6 +16,8 @@ from .indexer import Library, extract_folders, find_by_name, pick_library
 class KavitaClient(ServiceClient):
     name = "kavita"
     base_url = settings.kavita_url
+    #: Every call carries the API key. See `ServiceClient.quotes_error_bodies`.
+    quotes_error_bodies = False
 
     def _headers(self) -> dict[str, str]:
         return {"x-api-key": require_cred("kavita_api_key", "Kavita API key")}

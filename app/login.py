@@ -12,6 +12,7 @@ request by design — you might take two minutes over a CAPTCHA.
 
 from __future__ import annotations
 
+import shutil
 import threading
 import time
 from pathlib import Path
@@ -131,3 +132,87 @@ def delete_stored_session() -> None:
     path = state_path()
     if path.exists():
         path.unlink()
+
+
+def _login_browser_is_running() -> bool:
+    """Whether a Chromium is up on this machine's login profile.
+
+    Asked of the process table as well as of `login_session`, because the two
+    ways to reach `forget_stored_session` are different processes. The server
+    owns the browser and its in-memory `_active` marker; `forget-session` is a
+    CLI invocation, and in a fresh process that marker is *always* False — so a
+    guard that consulted only `_active` would never fire for the one caller
+    that can actually delete the profile out from under a running Chromium.
+
+    Any process whose command line names the profile directory counts, which is
+    how Playwright passes it (`--user-data-dir=`). Reading /proc needs no
+    external binary, so this works on a bare-metal host as well as in the
+    image.
+    """
+    if login_session.status()["active"]:
+        return True
+
+    marker = str(Path(settings.data_dir) / "browser-profile").encode()
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if marker in (entry / "cmdline").read_bytes():
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def forget_stored_session() -> dict:
+    """Delete everything that carries the Goodreads session.
+
+    `delete_stored_session` removes the state file, and that is not on its own
+    enough to answer "forget this session": the persistent browser profile
+    holds the same cookies for the same account, so removing one of the two
+    leaves a live session sitting on the volume. Both go, and the next sign-in
+    starts from nothing.
+
+    Refuses while a login browser is running. It is using that profile, and
+    deleting it underneath Chromium would leave the operator with a broken
+    window *and* no session — neither the one they wanted to keep nor the one
+    they wanted to drop. See `_login_browser_is_running` for why that check
+    cannot be the in-memory flag alone.
+
+    Reports `ok: False` rather than raising when something cannot be removed:
+    the caller is a CLI whose whole job is to say whether the cookies are gone,
+    so a traceback would be a worse answer than an honest no.
+    """
+    if _login_browser_is_running():
+        return {
+            "ok": False,
+            "removed": [],
+            "message": "a login browser is running — cancel it first",
+        }
+
+    removed: list[str] = []
+    state = state_path()
+    try:
+        if state.exists():
+            delete_stored_session()
+            removed.append(state.name)
+    except OSError as exc:
+        return {
+            "ok": False,
+            "removed": removed,
+            "message": f"could not remove {state.name}: {exc}",
+        }
+
+    profile = Path(settings.data_dir) / "browser-profile"
+    if profile.is_dir():
+        try:
+            shutil.rmtree(profile)
+        except OSError as exc:
+            return {
+                "ok": False,
+                "removed": removed,
+                "message": f"could not remove {profile.name}/: {exc}",
+            }
+        removed.append(profile.name + "/")
+
+    return {"ok": True, "removed": removed}

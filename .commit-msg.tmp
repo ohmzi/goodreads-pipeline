@@ -1,0 +1,86 @@
+v1.4.0 — security hardening: sessions, requests, stored data, sweeps
+
+Applies the remediation plan written from the third-party audit (44 findings
+put through an 89-agent verification pass, which judged 36 of the audit's own
+proposed fixes unsound and refuted two findings outright). Those two refuted
+claims are deliberately not acted on: removing /static/app.css from
+PUBLIC_PATHS (it breaks the sign-in page) and the X-Forwarded-For finding
+(gated behind an off-by-default TRUST_PROXY).
+
+Sessions
+- Signing out rotates session_epoch, so it revokes every token for that user on
+  every device rather than only dropping this browser's cookie.
+- A sign-in waits up to 1s for one of the eight concurrency slots instead of
+  being refused the instant none is free. The throttle delay keeps its slot on
+  purpose: that is what bounds how many guesses a flood lands per second.
+- The username is bounded at 64 characters where it is used, not by a model cap
+  that could reject an account that already exists.
+- Failed sign-ins are logged on the 1st and every 10th attempt per client, and
+  every event message is bounded and whitespace-collapsed, so an anonymous
+  caller can no longer evict the activity feed.
+
+Requests
+- Origin-versus-Host check on every request, before the session check. The VNC
+  handshake checks origin before the cookie and answers both with close(1008),
+  so it cannot be used to tell the two apart.
+- The gate compares request.scope["path"], closing a %3F-in-the-path route past
+  the PUBLIC_PATHS check and the Host-header variant of it.
+- Four response headers: nosniff, no-referrer, X-Frame-Options: SAMEORIGIN, and
+  no-store on /api/. No CSP — the useful one blanks every book cover.
+- Range is dropped on the static mount, so starlette's pre-1.6.0 range merge is
+  not reachable through the publicly-fetchable assets.
+
+Stored data
+- umask 077 for the whole process, plus a one-off chmod at startup for what is
+  already on disk. The media library is deliberately excluded, and both places
+  that create directories under it restore a traversable mode.
+- GOODREADS_SECRET_KEY is refused at first use below 32 characters, with a
+  message of its own so it is not confused with the empty case.
+- forget-session deletes the stored Goodreads session and the browser profile,
+  and refuses while a browser is running — checked against the process table,
+  because the CLI is a different process from the server that owns it.
+
+Talking to your services
+- Redirects are refused rather than followed, and reported as a misconfigured
+  service rather than as an outage, so the breaker cannot hold a permanent
+  misconfiguration for 24 hours.
+- Response bodies are capped at 16 MiB and refused whole rather than truncated,
+  with the transfer headers dropped on the rebuild: decoded bytes must not be
+  decoded twice, or a gzipped upstream reports as an outage and is forgiven.
+- Error bodies are withheld from any client that authenticates, so a credential
+  cannot reach stage_runs.detail. ClientError.body exposes the text to the one
+  caller that has to branch on it (BookLore answers 400 both to a live-token
+  conflict and to a wrong password, so the status cannot stand in for it).
+- The Test button runs the same authenticated probe as the health check, so a
+  wrong API key fails it instead of passing an unauthenticated route.
+- An epub's two XML documents are size-capped and entity definitions refused.
+
+Sweeps
+- The 120s budget now covers the periodic phases, and the worker pool outlives
+  the sweep instead of being joined by ThreadPoolExecutor.__exit__ — which is
+  what made the budget advisory. Measured live, sweeps against that budget were
+  ending at 310-432s.
+- A book left mid-advance is tracked in _in_flight so it cannot be run twice,
+  and a failed submit releases its claim instead of leaking the book forever.
+
+Container
+- no-new-privileges, pids_limit: 512 (measured: idle 12, login browser 157),
+  and every capability dropped except DAC_OVERRIDE, which /data requires — the
+  bind source is owned by the host user's uid, so uid 0 cannot write to it
+  without that one.
+- fastapi 0.135.0 with an explicit starlette 1.6.0 pin, the oldest starlette
+  that bounds how many byte ranges it merges. python-multipart removed: it was
+  never used.
+
+Docs
+- SECURITY.md rewritten around a "what is enforced, and where" table, so the
+  posture can be read in one page before the reasoning.
+- PUBLISH_HOST guidance corrected. It is not exposure control — a tunnel in
+  front reaches the app whichever address the port is bound to — and narrowing
+  it to an address the front end does not dial takes the site down, because a
+  proxy in a container dials the host as its bridge gateway, never as
+  127.0.0.1. The corrected note names the command that tells you which.
+
+tests/ grows from 25 modules to 35 (348 passing on a dev host; 347 passing with
+one root-only skip in the image under Python 3.10). requirements-dev.txt
+declares pytest, which nothing did before.

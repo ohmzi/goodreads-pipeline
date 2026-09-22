@@ -8,6 +8,82 @@ from __future__ import annotations
 
 VERSION_HISTORY: list[dict] = [
     {
+        "version": "1.4",
+        "date": "2026-09-22",
+        "summary": (
+            "A security release. Signing out now revokes every session, "
+            "cross-site requests are refused on the server, the data volume is "
+            "owner-only, and the calls to your other services refuse redirects "
+            "and stop quoting error bodies that can carry a credential."
+        ),
+        "sections": [
+            {
+                "heading": "Read this before upgrading",
+                "items": [
+                    "PUBLISH_HOST can take the app offline if it names an address your front end does not dial, so leave it unset unless you have checked. It decides which of the host's own addresses the port answers on; a value that does not match means every request is refused before it arrives, which is a 502 with nothing in the app's logs. Check with: docker compose logs goodreads | grep 'GET /login' — the left-hand address is the front end. A proxy or tunnel in a container dials you as its bridge gateway (172.x.0.1), never 127.0.0.1, so it needs 0.0.0.0.",
+                    "PUBLIC_ORIGIN is only needed by a proxy that rewrites Host; without it the new same-origin check refuses state-changing requests with 403. Test it in one request: post a deliberately wrong login to /api/auth/login through the public URL with the real Origin header — 401 means the check passed, 403 means PUBLIC_ORIGIN is missing.",
+                    "Check GOODREADS_SECRET_KEY is at least 32 characters. A shorter key does not stop the container, but it is refused the first time a credential is read or written, and replacing it means re-entering every credential.",
+                    "The port cannot be narrowed in docker-compose.override.yml: ports: !override: does not work, and Compose publishes both mappings. Use PUBLISH_HOST.",
+                ],
+            },
+            {
+                "heading": "Sessions",
+                "items": [
+                    "Signing out now rotates the user's session_epoch, so every token minted for that user stops being accepted on every device. A copy of the cookie taken earlier is dead the moment sign-out returns.",
+                    "A sign-in waits up to a second for one of the eight concurrency slots instead of being refused the instant none is free, so a flood can no longer turn your own correct password into a 429.",
+                    "A username is bounded at 64 characters where it is used, rather than by a model-level cap that could reject an account that already exists.",
+                    "Failed sign-ins are logged on the first and every tenth attempt from a client, with a count, so a caller in a loop cannot push your real activity out of the feed.",
+                ],
+            },
+            {
+                "heading": "Requests",
+                "items": [
+                    "A request whose Origin disagrees with the host it was sent to is refused with 403 before the session is looked at. A missing Origin is still allowed, so scripts and the healthcheck are unaffected.",
+                    "The VNC WebSocket checks the origin before the cookie and answers both with the same close(1008), so the handshake cannot tell you which one failed.",
+                    "The session gate compares the path the router routes on, closing a %3F-in-the-path way past it.",
+                    "Four response headers are set: nosniff, no-referrer, X-Frame-Options: SAMEORIGIN, and no-store on API answers. No CSP, deliberately — the useful one blanks every book cover.",
+                ],
+            },
+            {
+                "heading": "Stored data",
+                "items": [
+                    "The data volume is owner-only: umask 077 for the process, plus a one-off chmod at startup for what is already on disk. The activity feed says what it changed, once.",
+                    "The media library is explicitly not tightened — other applications read it, and a category folder made owner-only would make every book beneath it unindexable.",
+                    "The secret key must be at least 32 characters; nothing stretches it, so it is exactly as strong as the string in .env.",
+                    "forget-session deletes the stored Goodreads session and the browser profile, and refuses while a login browser is running.",
+                ],
+            },
+            {
+                "heading": "Talking to your services",
+                "items": [
+                    "Redirects from a service are refused rather than followed, and reported as a misconfiguration instead of an outage.",
+                    "Response bodies are capped at 16 MiB, refused whole rather than truncated.",
+                    "Error bodies are no longer quoted back for any client that authenticates — they can echo the credential, and stage_runs.detail is not encrypted.",
+                    "The Test button now runs the same authenticated probe as the health check, so a wrong API key fails it. It used to call an unauthenticated route and pass.",
+                    "An epub's two XML documents are size-capped and entity definitions refused.",
+                ],
+            },
+            {
+                "heading": "Sweeps",
+                "items": [
+                    "The 120-second budget is real: the clock now covers the periodic phases, and the worker pool no longer waits for work the sweep has stopped asking for. Measured live, sweeps were ending at 310-432s.",
+                ],
+            },
+            {
+                "heading": "Container",
+                "items": [
+                    "no-new-privileges, pids_limit: 512 (measured: idle 12, login browser 157), and all capabilities dropped except DAC_OVERRIDE — which is required, since the /data mount is owned by the host user's uid and uid 0 cannot write to it without it.",
+                ],
+            },
+            {
+                "heading": "Dependencies",
+                "items": [
+                    "fastapi 0.135.0 and an explicit starlette 1.6.0 — the oldest starlette that bounds how many byte ranges it will merge. python-multipart removed: it was never used.",
+                ],
+            },
+        ],
+    },
+    {
         "version": "1.3",
         "date": "2026-09-21",
         "summary": (

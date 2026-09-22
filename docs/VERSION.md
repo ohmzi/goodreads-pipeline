@@ -2,10 +2,110 @@
 
 goodreads watches a Goodreads **to-read** shelf and carries each book through to
 a shelved, indexed library — Shelfmark, classify, place, index, notebook, shelve
-— without ever making a second copy of a file. Current version: **v1.2**.
+— without ever making a second copy of a file. Current version: **v1.4**.
 
 Newest version first. Each release gets a section in the same shape as v1.0
 below: a date line, then one-line bullets under area headings.
+
+## v1.4
+
+2026-09-22
+
+A security release. Almost nothing here changes what the app does when it is
+working; it changes what it does when someone else is trying to make it do
+something else, and it is worth reading before you upgrade rather than after.
+
+### Read this before upgrading
+
+- **`PUBLISH_HOST` can take the app offline if it is set to the wrong address,
+  so leave it unset unless you have checked.** It decides which of the host's
+  addresses the port answers on, and a value the front end does not dial means
+  every request is refused before it reaches this app — a 502 with nothing in
+  the app's own logs, because the request never arrives. Find out where your
+  front end reaches you from before changing it:
+  `docker compose logs goodreads | grep 'GET /login'`. A proxy or tunnel running
+  in a *container* dials you as its bridge gateway (`172.x.0.1`), never as
+  `127.0.0.1`, so it needs `0.0.0.0`.
+- **`PUBLIC_ORIGIN` is only needed by a proxy that rewrites `Host`.** Without it
+  the new same-origin check treats every state-changing request as cross-site
+  (403). Test it in one request: post a deliberately wrong login to
+  `/api/auth/login` through the public URL with the real `Origin` header — `401`
+  means the check passed and `403` means `PUBLIC_ORIGIN` is what is missing.
+- **Check `GOODREADS_SECRET_KEY` is at least 32 characters.** A shorter key does
+  not stop the container, but it is refused the first time a credential is read
+  or written. Replacing it means re-entering every credential.
+- **`docker-compose.override.yml` cannot set the port** — `ports: !override:`
+  does not work, and Compose publishes both mappings. Use `PUBLISH_HOST`.
+
+### Sessions
+
+- **Signing out now revokes.** It rotates the user's `session_epoch`, so every
+  token minted for that user stops being accepted, on every device — a copy of
+  the cookie taken earlier is dead the moment sign-out returns.
+- A sign-in waits up to a second for one of the eight concurrency slots instead
+  of being refused the instant none is free, so a flood can no longer turn the
+  owner's own correct password into a 429.
+- A username is bounded at 64 characters where it is used, rather than by a
+  model-level cap that could reject an account that already exists.
+- Failed sign-ins are logged on the first and every tenth attempt from a client,
+  with a count, so a caller in a loop cannot push the operator's real activity
+  out of the feed.
+
+### Requests
+
+- A request whose `Origin` disagrees with the host it was sent to is refused
+  with 403, before the session is even looked at; a missing `Origin` is still
+  allowed, so scripts and the healthcheck are unaffected.
+- The VNC WebSocket checks the origin before the cookie, and answers both with
+  the same `close(1008)`, so the handshake cannot tell you which one failed.
+- The session gate compares the path the router routes on, closing a
+  `%3F`-in-the-path way past it.
+- Four response headers are now set: `nosniff`, `no-referrer`,
+  `X-Frame-Options: SAMEORIGIN`, and `no-store` on API answers. No CSP —
+  deliberately, because the useful one blanks every book cover.
+
+### Stored data
+
+- The data volume is owner-only: `umask 077` for the process, plus a one-off
+  `chmod` at startup for what is already on disk. The activity feed says what it
+  changed, once.
+- The media library is explicitly **not** tightened — other applications read
+  it, and a category folder made owner-only would make every book beneath it
+  unindexable.
+- `GOODREADS_SECRET_KEY` must be at least 32 characters; nothing stretches it,
+  so it is exactly as strong as the string in `.env`.
+- `goodreads forget-session` deletes the stored Goodreads session *and* the
+  browser profile, and refuses while a login browser is running.
+
+### Talking to your services
+
+- Redirects from a service are refused rather than followed, and reported as a
+  misconfiguration instead of an outage.
+- Response bodies are capped at 16 MiB, refused whole rather than truncated.
+- Error bodies are no longer quoted back for any client that authenticates —
+  they can echo the credential, and `stage_runs.detail` is not encrypted.
+- The Test button now runs the same authenticated probe as the health check, so
+  a wrong API key fails it. It used to call an unauthenticated route and pass.
+- An epub's two XML documents are size-capped and entity definitions refused.
+
+### Sweeps
+
+- The 120-second budget is real: the clock now covers the periodic phases, and
+  the worker pool no longer waits for work the sweep has stopped asking for.
+  Measured on a live deployment, sweeps were ending at 310-432s.
+
+### Container
+
+- `no-new-privileges`, `pids_limit: 512` (measured: idle 12, login browser 157),
+  and all capabilities dropped except `DAC_OVERRIDE` — which is required, since
+  the `/data` mount is owned by the host user's uid and uid 0 cannot write to it
+  without it.
+
+### Dependencies
+
+- `fastapi` 0.135.0 and an explicit `starlette` 1.6.0 — the oldest starlette
+  that bounds how many byte ranges it will merge. `python-multipart` removed: it
+  was never used.
 
 ## v1.3
 
@@ -251,6 +351,7 @@ below: a date line, then one-line bullets under area headings.
 
 | Version | Date | Summary |
 |---|---|---|
+| v1.4 | 2026-09-22 | A security release: sign-out revokes every session, cross-site requests are refused, the data volume is owner-only, and the calls to your other services refuse redirects and stop quoting error bodies that can carry credentials. |
 | v1.3 | 2026-09-21 | A title-matching bug and an Open Notebook duplicate-source bug, both of which misreported working books as failed, plus an issues panel that stops retrying into a held service. |
 | v1.2 | 2026-09-21 | A native-app-style mobile header with an animated search, a cohesive desktop header, and a stolen-focus fix. |
 | v1.1 | 2026-09-20 | Goodreads-faithful redesign: sign-in page rebuilt, white page chrome with a footer, structured version page, a narrow-screen header, and keyboard focus states. |
@@ -264,7 +365,7 @@ below: a date line, then one-line bullets under area headings.
    no paragraphs.
 2. Add a row to the top of the **Version history** table with the version, the
    date, and a one-line summary of what that release changed.
-3. Bump `__version__` in `app/__init__.py`, currently `1.3.0`. It is the only
+3. Bump `__version__` in `app/__init__.py`, currently `1.4.0`. It is the only
    version literal: `FastAPI(version=__version__)`, `/api/version` and
    `/api/state` all read it, and `asset_version` is a short hash of `app.js`
    and `app.css` that changes on its own whenever either file changes. Then add

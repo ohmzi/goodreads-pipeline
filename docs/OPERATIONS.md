@@ -35,6 +35,38 @@ browser is serving a cached bundle.
 present. Editing the image copy changes nothing for a container that has the
 override, and the override survives a rebuild by design.
 
+### What a security upgrade changes on first start
+
+Three things, all one-off, all in the activity feed:
+
+- **`tightened permissions on …`** — the data volume used to be readable by any
+  account on the host. The app now runs under `umask 077` and, on the first
+  start after the upgrade, `chmod`s what is already there:
+  `goodreads.db` and its `-wal`/`-shm` sidecars and `goodreads_state.json` to
+  `0600`, and `browser-profile/` to `0700`. The line names what changed and
+  appears once; a second start logs nothing, because there is nothing left to
+  change. See [SECURITY.md](SECURITY.md) for what these are.
+- **The browser profile is no longer traversable by other accounts.** Nothing in
+  this app needs it to be. If something else on the host was reading it, that is
+  a finding, not a regression.
+- **`GOODREADS_SECRET_KEY` must be at least 32 characters.** Check it now rather
+  than discovering it when a credential fails to save:
+
+  ```bash
+  docker compose exec goodreads python -c \
+    "from app.config import settings; print(len(settings.secret_key))"
+  ```
+
+  A shorter key does not stop the container — deliberately, so a running
+  deployment does not crash-loop — but it is refused the first time a credential
+  is read or written, with a message saying the key is *short* rather than
+  missing. Replacing it means re-entering every credential in Settings, so
+  replace it while you can still reach the old one.
+
+If the host mounts the library into other applications, note that the media
+library is deliberately **not** covered by any of this: `/books` and
+`/audiobooks` keep the modes they had, because other apps read them.
+
 ## Backup and restore
 
 State lives in four places, and they are not equally important.
@@ -112,10 +144,10 @@ The browser profile is optional; leave it out and the next login starts
 signed out. Restore `.env` before starting, and restore the key that encrypted
 the database. A missing key and a wrong key fail differently: with no key set
 `CredentialCipher` refuses to construct and everything reports
-*"GOODREADS_SECRET_KEY is not set"* (app/crypto.py:21-27); with a key that is
+*"GOODREADS_SECRET_KEY is not set"* (app/crypto.py:34-37); with a key that is
 present but wrong, each stored credential raises *"Stored credential could not
 be decrypted"* and the operator sees a Settings page full of failing tests
-(app/crypto.py:34-41). Only the original key clears either one, so without it
+(app/crypto.py:57-65). Only the original key clears either one, so without it
 re-enter every credential.
 
 ## The maintenance CLI
@@ -137,9 +169,27 @@ docker compose exec goodreads python -m app.cli <subcommand>
 | `repair` | `--apply` | yes | Open Notebook links, stage resets |
 | `reconcile` | `--apply` | yes | `shelve` stage resets |
 | `delete-user` | `<username>` | n/a | the `users` row |
+| `forget-session` | none | n/a | the Goodreads session **and** the browser profile |
 
 `--length` defaults to 20 and `--limit` to 0, which means no cap on the
 completed listing.
+
+### `forget-session`
+
+Ends the local Goodreads session. Both halves of it go —
+`/data/goodreads_state.json` and `/data/browser-profile/` — because they carry
+the same cookies for the same account, and removing one of the two would leave
+a live session on the volume. The next sign-in on the Goodreads page starts a
+fresh browser and cannot resume the old session.
+
+It refuses while a login browser is running: it is using that profile, and
+deleting it underneath Chromium leaves you with a broken window and no session
+either way. Cancel the login first.
+
+This is the only supported way to end a Goodreads session from the app's side.
+There is no button for it, because the point of running it is to *know* the
+cookies are gone, and a shell is where you find that out for certain
+(`app/login.py:137`).
 
 ### `audit`
 
@@ -227,7 +277,37 @@ writes to Open Notebook and resets stage rows. `reconcile --apply` queues real
 shelf writes. `backfill-genres` writes immediately and queues file moves.
 `delete-user` removes a login, and `set-password` writes the `users` row and
 rotates the session epoch, which signs out that user's existing sessions
-(app/cli.py:603). Nothing else in this CLI changes anything.
+(`app/cli.py:730`). `forget-session` deletes the Goodreads session and the
+browser profile. Nothing else in this CLI changes anything.
+
+## Tests
+
+`pytest` is not a runtime dependency, so it is declared separately and nothing
+installs it for you:
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+python -m pytest tests/ -q
+```
+
+The suite needs no network and no database to run. `tests/conftest.py` points
+`DATA_DIR` at a throwaway directory and every service URL at `http://127.0.0.1:9`
+— a discard port that refuses instantly — so a test that accidentally reaches
+out fails fast rather than touching a real library.
+
+**Run them in the image, not on the host, when the change could be
+version-sensitive.** The container is Python 3.10 (jammy) and a dev host is
+usually newer, and the two do not agree about everything:
+
+```bash
+docker run --rm -v "$PWD":/work:ro -w /work goodreads:local bash -c \
+  'pip install -q -r requirements-dev.txt && python -m pytest tests/ -q'
+```
+
+`requirements-dev.txt` is deliberately not copied into the image — the
+container runs the app, not the suite — which is why the command installs it.
+One test skips when the suite runs as root inside the container, because root
+pays no attention to mode bits; that skip is expected and is not a failure.
 
 ## Health
 
@@ -316,16 +396,19 @@ it is up, or when the outage is over and you would rather not spend a cooldown
 finding out. It is not a way to skip an outage: the books it releases run
 against the service immediately.
 
-### The Test button is not the probe
+### The Test button and the banner answer the same question
 
-The Services page's Test button calls each client's own `health()` route, and
-every one of those is unauthenticated: Kavita `/api/health`, BookLore
+They used not to. Test called each client's own `health()` route, and every one
+of those is unauthenticated — Kavita `/api/health`, BookLore
 `/api/v1/healthcheck`, Audiobookshelf `/status`, Open Notebook `/api/config`,
-Shelfmark `/api/health`. A wrong API key passes it.
+Shelfmark `/api/health` — so a wrong API key passed it and the panels could
+show a green tick beside a red banner naming the same service.
 
-Saving credentials in the UI calls `POST /api/health/services/check`, which
-re-runs the authenticated probes above. When Test and the banner disagree, the
-banner is right.
+Test now runs the same authenticated probe the background check runs
+(`app/health.py`, `probe`): listing libraries for the library apps, listing
+notebooks for Open Notebook, and the health route only for Shelfmark, which
+takes no credential on this deployment. If the two ever disagree, that is a bug
+rather than a known limitation.
 
 ### Probing now
 
@@ -343,9 +426,9 @@ same control as *Re-check*. The UI also runs this automatically after Save.
 | Sign-in looks successful but you land back on the login page | `COOKIE_SECURE=1` while serving plain HTTP, so the browser drops the cookie | Set `COOKIE_SECURE=0`, or terminate TLS in front first |
 | Activity shows *"no login exists yet"* | Empty user table | `set-password <username> --generate`, then sign in |
 | Red banner naming a service, `credentials` chip | The authenticated probe was refused: wrong key or wrong URL | Open Services, re-enter the credential, Save, then *Re-check all* |
-| Test reports ✓ but the banner stays red | Test hits an unauthenticated route; the probe lists libraries | Trust the probe. Check you are using that service's own credential |
-| Every credential raises *"GOODREADS_SECRET_KEY is not set"*, or every login 500s | The key is missing or empty in `.env` | Restore the key from the `.env` backup and restart. Session tokens are HMAC-signed with it too, so sign-in fails as well (app/crypto.py:21-27) |
-| Every credential raises *"Stored credential could not be decrypted"* | A key is set, but not the one that encrypted them | Restore the original key from the `.env` backup, or re-enter every credential (app/crypto.py:34-41) |
+| Test reports ✓ but the banner stays red | Both now run the same authenticated probe, so this should not happen | It is a bug. Capture the `detail` from both and report it |
+| Every credential raises *"GOODREADS_SECRET_KEY is not set"*, or every login 500s | The key is missing or empty in `.env` | Restore the key from the `.env` backup and restart. Session tokens are HMAC-signed with it too, so sign-in fails as well (app/crypto.py:34-37) |
+| Every credential raises *"Stored credential could not be decrypted"* | A key is set, but not the one that encrypted them | Restore the original key from the `.env` backup, or re-enter every credential (app/crypto.py:57-65) |
 | `discover failed:` with nothing after the colon | A read timeout on a Goodreads shelf read. The client's read timeout is 30 s, and httpx's timeout exceptions stringify to an empty message | Nothing. Discover runs every 15 minutes and logs only a changed message, so a recurring timeout shows as one line. If it never recovers, check the session (next row) |
 | *"Goodreads redirected to the sign-in page"* or *"Could not find a CSRF token"* | The stored browser session expired | Goodreads page, *Start browser*, sign in, *Save session* |
 | *"No Goodreads session stored"* | `goodreads_state.json` missing | Same as above |
@@ -358,6 +441,8 @@ same control as *Re-check*. The UI also runs this automatically after Save.
 | Everything 4xx on `/api/...` with `authentication required` | No session cookie, or an expired one (7 day TTL) | Sign in again |
 | `docker compose up` fails with *"all predefined address pools have been fully subnetted"* | The host's docker address pools are exhausted, or the subnet pinned in `docker-compose.override.yml` collides with a network already on the host | Pin another private /24 in `docker-compose.override.yml` (gitignored, host-specific) |
 | `bind: address already in use` on start | Something else holds the published port | Change the left side of the `8091:8090` mapping |
+| The site returns 502 and **nothing appears in this app's logs** | `PUBLISH_HOST` names an address your front end does not dial, so the request is refused before it reaches the app | Check where the front end reaches you from — `docker compose logs goodreads \| grep 'GET /login'`, and look at the left-hand address — then set `PUBLISH_HOST` to an address that covers it. A proxy or tunnel in a **container** dials you as its bridge gateway (`172.x.0.1`), never `127.0.0.1`, so it needs `0.0.0.0`. The empty logs are the tell: a request that arrives but is refused by the origin check logs a 403, and a request that never arrives logs nothing at all |
+| Everything 403s, but the pages load | A proxy is rewriting `Host`, so every state-changing request looks cross-site | Set `PUBLIC_ORIGIN` to the origin a browser uses, and see *Working out what to set* in [SECURITY.md](SECURITY.md) |
 | A book never leaves `place` | The file is not sitting *directly* in a staging root | Check the staging dir. `place` treats anything already nested as organised, deliberately. An existing destination is not a stall: `move_into_place` unlinks a same-inode duplicate or suffixes the name via `_dedupe` (app/pathing.py:276-302) |
 | `index` fails with an auth kind but the key looks right | The stage is failed only when *nothing* was rescanned; `_kind_of` reads the collected error text inside that branch (app/stages/index.py:86-91), so an auth kind means every app it tried refused. One app 401ing while another rescans returns ok, with the failure named in the detail | Open the book detail; the detail string names each app that failed |
 | Books parked after a fresh install | Stages hit their attempt cap while credentials were still unset | Enter credentials, then *Retry all* on the group |

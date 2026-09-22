@@ -1,9 +1,19 @@
-fastapi==0.115.6
+# Pinned deliberately, and starlette is pinned explicitly even though it
+# arrives transitively: the version that matters for the byte-range finding is
+# starlette's, and an unpinned transitive dependency is one a rebuild can move
+# without anyone deciding to.
+#
+# fastapi 0.135.0 is the oldest release that does not cap starlette below 1.0,
+# and starlette 1.6.0 is the oldest that bounds the number of ranges it will
+# merge (`max_ranges = 100`). Earlier starlette merges overlapping ranges in a
+# nested loop, which is why `app/main.py` also drops `Range` outright on the
+# static mount rather than relying on this pin alone.
+fastapi==0.135.0
+starlette==1.6.0
 uvicorn[standard]==0.34.0
 httpx==0.28.1
 PyYAML==6.0.2
 cryptography==44.0.0
 beautifulsoup4==4.12.3
 playwright==1.49.1
-python-multipart==0.0.20
 mutagen==1.47.0

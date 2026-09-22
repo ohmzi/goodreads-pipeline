@@ -99,6 +99,30 @@ head of it. "Least recently touched" is the *most recent* timestamp on the book,
 not the oldest: an oldest-first key never changes once set, so the same books
 led every sweep and the untouched remainder never got its turn.
 
+Three details make that budget real rather than advisory, and each of them
+exists because it was not:
+
+- **The clock starts before the three periodic phases**, not at the book loop.
+  Those phases are plain synchronous calls and together take about half a minute
+  against live services (measured: reconcile 25s over 255 shelf records,
+  discover 6s over a 92-book shelf, check_all 0.5s), so running them outside the
+  budget meant the duration a sweep reported was never the time it took. A phase
+  is now started only while the remaining budget exceeds a reserve
+  (`_PHASE_RESERVE_SECONDS`, 40s); one that cannot plausibly finish is left for
+  the next sweep, and its timer is not advanced, so nothing is lost.
+- **The worker pool outlives the sweep.** `ThreadPoolExecutor.__exit__` calls
+  `shutdown(wait=True)`, so entering one as a context manager meant every break
+  out of the loop was followed by a wait for six in-flight books. Measured on a
+  live deployment, sweeps against the 120s budget were ending at 310-432s. The
+  pool belongs to the scheduler and is never joined, which is what makes giving
+  up on time possible at all.
+- **A book left mid-advance is not run twice.** Abandoning a worker does not
+  stop it, so the next sweep has to know which books are still in someone's
+  hands: `_in_flight` is claimed before submitting and released by a future
+  callback, so it stays correct even when nobody is waiting for the result. The
+  sweep summary carries `in_flight` and `abandoned` so this is visible rather
+  than inferred.
+
 A second sweep cannot start while one is running — `sweep()` takes a lock
 non-blockingly and returns `{"skipped": "a sweep is already running"}`.
 

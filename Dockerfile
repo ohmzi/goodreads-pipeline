@@ -16,8 +16,15 @@ ENV DEBIAN_FRONTEND=noninteractive
 # xvfb + x11vnc give the Goodreads login somewhere to happen: there is no
 # password flow left to automate, so a human needs a real browser. noVNC's
 # static client is served by the app itself over its authenticated WebSocket
-# bridge, so websockify is deliberately NOT installed — x11vnc stays on
-# loopback and no VNC port is ever exposed.
+# bridge — x11vnc stays on loopback and no VNC port is ever exposed.
+#
+# The bridge is what makes a websockify listener unnecessary, NOT what makes it
+# absent: `novnc` hard-depends on `websockify` on jammy, so it IS installed and
+# is simply never started.
+#
+# *** Do not purge it. *** apt would take `novnc` with it, and /usr/share/novnc
+# is exactly what the app's /vnc/{asset} route serves — so the Goodreads login
+# panel would go blank, with the rest of the app looking perfectly fine.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         -o Dpkg::Options::="--force-confdef" \
         -o Dpkg::Options::="--force-confold" \

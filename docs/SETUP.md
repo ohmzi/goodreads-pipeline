@@ -68,6 +68,36 @@ docker compose up -d --build
 loopback inside the container and the app bridges to it over a session-checked
 WebSocket at `/vnc/ws`.
 
+**`8091` is published on every interface by default. That is more exposed than
+it sounds** — ufw does not cover a published port, because docker's own iptables
+rules are evaluated before the firewall's — so it is worth narrowing with
+`PUBLISH_HOST` in `.env`. Two things to know before you do:
+
+- **Narrowing it wrongly takes the app offline.** A binding to one address
+  answers only on that address, and whatever sits in front then serves a 502.
+- **A proxy running in a container dials you as its bridge gateway**
+  (`172.x.0.1`), never as `127.0.0.1`. So `127.0.0.1` is correct only for a
+  proxy or tunnel running on the host itself.
+
+Once a front end is in place, find out where it reaches you from and set the
+value to match:
+
+```bash
+docker compose logs goodreads | grep 'GET /login'
+```
+
+```
+PUBLISH_HOST=0.0.0.0       # every interface — the safe default
+PUBLISH_HOST=127.0.0.1     # a proxy or tunnel on the host, or an SSH tunnel
+PUBLISH_HOST=100.64.0.1    # one VPN interface (Tailscale, WireGuard);
+                           # find it with `ip -4 addr show tailscale0`
+PUBLISH_HOST=192.168.1.50  # one LAN address
+```
+
+Then `docker compose up -d` again for it to take effect. Note that this decides
+which of the host's own addresses the port answers on; it does not make the app
+unreachable from the internet if a tunnel fronts it.
+
 Open `http://<host>:8091`. There is nothing to sign in with yet.
 
 ## 3. Create a login
@@ -195,8 +225,16 @@ reaches the VNC server over loopback. None of it is configurable:
 | Screen geometry | `1280x900x24` | `docker/start-vnc.sh:14` |
 | Xvfb TCP listener | disabled (`-nolisten tcp`) | `docker/start-vnc.sh:26` |
 | x11vnc RFB port | `5900`, loopback only (`-localhost -nopw`) | `docker/start-vnc.sh:15`, `:38` |
-| The app's bridge target | `127.0.0.1:5900` | `app/main.py:43-44` |
+| The app's bridge target | `127.0.0.1:5900` | `app/main.py:44` |
 | noVNC client root | `/usr/share/novnc` | `app/main.py:42` |
+
+The script also *tries* to confirm the loopback bind with `ss`
+(`docker/start-vnc.sh:48`), but `iproute2` is not installed in this image, so
+that branch is skipped and has never run. The `-localhost` flag is the actual
+control; install `iproute2` if you want the confirmation to be real. If you do,
+note that `novnc` hard-depends on `websockify` on jammy — **do not purge it**,
+because the purge takes `novnc` with it and `/usr/share/novnc` is what
+`/vnc/{asset}` serves. `websockify` is installed and simply never started.
 
 So the host needs Playwright's browser and the same four packages the image
 installs (`Dockerfile:21-28`):

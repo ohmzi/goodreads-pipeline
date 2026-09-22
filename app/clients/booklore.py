@@ -40,6 +40,9 @@ _EXPIRY_MARGIN = 120.0
 class BookLoreClient(ServiceClient):
     name = "booklore"
     base_url = settings.booklore_url
+    #: The login body carries a password and every later call a bearer token.
+    #: See `ServiceClient.quotes_error_bodies`.
+    quotes_error_bodies = False
 
     #: Prefix for the credential keys this app reads, e.g. "booklore_username".
     cred_prefix = "booklore"
@@ -77,7 +80,13 @@ class BookLoreClient(ServiceClient):
                 # A conflict here usually means a previous token is still live
                 # and the server will not mint a second one. Wait briefly and
                 # try once more rather than surfacing a misleading auth error.
-                if exc.status == 400 and "conflict" in str(exc).lower():
+                #
+                # Read from `exc.body`, never from `str(exc)`: this client
+                # withholds response bodies from the message, because the
+                # request carries the password. The status cannot stand in for
+                # it — BookLore answers 400 to a *wrong password* as well, so
+                # branching on 400 alone would sleep and retry for every typo.
+                if exc.status == 400 and "conflict" in exc.body.lower():
                     time.sleep(1.5)
                     data = self.json(
                         "POST",

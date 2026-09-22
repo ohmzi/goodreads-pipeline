@@ -26,6 +26,9 @@ _TOKEN_LOCK = threading.Lock()
 class AudiobookshelfClient(ServiceClient):
     name = "audiobookshelf"
     base_url = settings.abs_url
+    #: The login body carries a password and every later call a bearer token.
+    #: See `ServiceClient.quotes_error_bodies`.
+    quotes_error_bodies = False
 
     def __init__(self, base_url: str | None = None):
         super().__init__(base_url)
