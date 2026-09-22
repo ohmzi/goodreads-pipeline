@@ -50,10 +50,24 @@ class KavitaClient(ServiceClient):
         )
 
     def find_series(self, query: str) -> list[dict]:
-        """Series matching `query`.
+        """Things Kavita would call a match for `query`: series names, and
+        standalone volumes that have no series of their own.
 
         Kavita's search route is `?queryString=` — `?query=` is rejected with a
         400, which looks like a broken endpoint rather than a wrong parameter.
+
+        The response's own `series` array is not the whole answer. A book
+        Kavita cannot assign a series to — the ordinary case for a standalone
+        novel with no series in its embedded metadata — comes back with
+        `series: []` and its real, searchable title sitting instead in
+        `chapters[].titleName` (Kavita's per-volume title, read off the file's
+        own metadata rather than the folder name `series[].name` would have
+        used). Reading only `series` made this method blind to every such
+        book: three of L. Frank Baum's own Oz novels scanned into this
+        library came back exactly this way — present, found by this same
+        search, and invisible to a caller that only looked at `series`. So
+        both are read here, into one list, because `verify` cannot fix a
+        false "missing" by rescanning something that was never missing.
         """
         if not query.strip():
             return []
@@ -61,15 +75,23 @@ class KavitaClient(ServiceClient):
             "GET", "/api/Search/search", "search",
             params={"queryString": query}, headers=self._headers(),
         )
-        series = (data or {}).get("series") or []
+        data = data or {}
         out = []
-        for item in series:
+        for item in data.get("series") or []:
             if not isinstance(item, dict):
                 continue
-            out.append({
-                "name": str(item.get("name") or item.get("title") or ""),
-                "library_id": item.get("libraryId"),
-            })
+            name = str(item.get("name") or item.get("title") or "")
+            if name:
+                out.append({"name": name, "library_id": item.get("libraryId")})
+        for chapter in data.get("chapters") or []:
+            if not isinstance(chapter, dict):
+                continue
+            name = str(chapter.get("titleName") or "")
+            # `library_id` has no direct equivalent on a chapter; every caller
+            # of this method reads only `name`, so leaving it unset costs
+            # nothing real and is honest about not knowing it.
+            if name:
+                out.append({"name": name, "library_id": None})
         return out
 
     def health(self) -> str:

@@ -136,12 +136,13 @@ def run(book: dict) -> models.StageResult:
 
     # --- the three book-tree indexers -------------------------------------
     if ebook and indexable:
-        # Kavita's search is a literal match against its own series names, and
-        # its names come from embedded metadata. Searching for the full
-        # Goodreads title — "A Decline in Prophets (Rowland Sinclair #2)" —
-        # matches nothing, while the series it actually holds is called
-        # "Decline in Prophets". A single distinctive word is enough to bring
-        # the right candidates back; `titles_match` picks between them.
+        # Kavita's search is a literal match against its own series and volume
+        # names (see `KavitaClient.find_series`), and those names come from
+        # embedded metadata. Searching for the full Goodreads title — "A
+        # Decline in Prophets (Rowland Sinclair #2)" — matches nothing, while
+        # the series it actually holds is called "Decline in Prophets". A
+        # single distinctive word is enough to bring the right candidates
+        # back; `titles_match` picks between them.
         kavita_query = _search_term(title)
 
         for label, factory in (
