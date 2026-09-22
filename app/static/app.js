@@ -132,14 +132,14 @@ function skeletonFor(name) {
     return `<div class="boot" role="status"><span class="sr-only">Loading…</span>
       ${skHead('150px')}
       <div class="panel">
-        <h2>${sk('sk-head')}<span class="grow"></span>${sk('sk-btn wide')}</h2>
+        <h2>${sk('sk-head')}<span class="grow"></span>${sk('sk-btn act')}</h2>
         <div class="body">
           <div class="svc-grid">${skRepeat(6, card)}</div>
           <p class="small muted mt" style="margin-bottom:0">${sk('sk-p1')}${sk('sk-p2')}${sk('sk-p3')}${sk('sk-p4')}</p>
         </div>
       </div>
       <div class="panel">
-        <h2>${sk('sk-head short')}<span class="grow"></span>${sk('sk-btn wide')}</h2>
+        <h2>${sk('sk-head short')}<span class="grow"></span>${sk('sk-btn act')}</h2>
         <div class="body">${sk('sk-p1')}</div>
       </div></div>`;
   }

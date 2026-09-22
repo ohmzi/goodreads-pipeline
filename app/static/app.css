@@ -1133,7 +1133,11 @@ a.chip.svc-tag:active {
    the second action on a line of its own and made the phone row 22px tall. */
 .sk-btn  { display: inline-block; vertical-align: middle;
            width: 66px; height: 18px; border-radius: var(--radius); }
-.sk-btn.wide { width: 50%; }
+.sk-btn.wide { width: 50%; }   /* the rail's run-control pair, in a 300px card */
+/* A panel-header action ("Re-check all", "Sweep now") is a normal button at
+   any column width. .wide is 50% of its container, which is right in the rail
+   and absurd in a full-width panel head. */
+.sk-btn.act  { width: 104px; }
 
 /* The .stage-row tracks are 138px / 112px / 1fr / auto, and these fill them:
    a name over a count, the service chip, two lines of detail, an action. Widths
