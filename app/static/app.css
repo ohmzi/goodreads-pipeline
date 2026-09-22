@@ -1111,13 +1111,28 @@ a.chip.svc-tag:active {
      as well as value from that band, so a bar reads as a bar in both places. */
   background: var(--line);
 }
-.sk-tile { display: block; }               /* .tile is a <button> rule; this is a div */
-.sk-n    { width: 52px; height: 22px; }    /* stands in for the 24px numeral */
-.sk-k    { width: 76%; height: 9px; margin-top: 3px; }   /* ...and the 12px label, */
-.sk-k2   { width: 52%; height: 9px; margin-top: 5px; }   /* which wraps to two lines */
+/* .tile is a <button> rule; this is a div. The two bars are inline-block, not
+   block, because the real .n and .k are inline spans: in a wide two-column
+   phone tile they sit on one line, and only in a narrow six-column desktop one
+   does the label wrap beneath the numeral. Stacking them unconditionally made
+   the phone tile 18px too tall. Inline-block reproduces the wrap instead of
+   hard-coding either answer, so one rule is right at both widths.
+   The line-heights are the two the real spans carry — 30px for the 24px
+   numeral, 16px for the 12px label — which is what makes the wrapped desktop
+   tile 46px of text rather than two 30px lines. */
+.sk-tile { display: block; line-height: 18px; }
+/* The 4px margins are what give this bar the 30px line box the 24px numeral
+   occupies; an inline-block contributes its margin-box, not its line-height. */
+.sk-n    { display: inline-block; vertical-align: middle;
+           width: 52px; height: 22px; margin: 4px 0; }
+.sk-k    { display: inline-block; vertical-align: middle;
+           width: 92px; height: 9px; margin-left: 7px; }
 .sk-head { width: 132px; height: 9px; }    /* the panel's own 12px uppercase h2 */
 .sk-head.short { width: 96px; }
-.sk-btn  { width: 66px; height: 18px; border-radius: var(--radius); }
+/* inline-block so the pair sits on one line; .sk is display:block, which put
+   the second action on a line of its own and made the phone row 22px tall. */
+.sk-btn  { display: inline-block; vertical-align: middle;
+           width: 66px; height: 18px; border-radius: var(--radius); }
 .sk-btn.wide { width: 50%; }
 
 /* The .stage-row tracks are 138px / 112px / 1fr / auto, and these fill them:
@@ -1134,6 +1149,15 @@ a.chip.svc-tag:active {
 .sk-l2   { width: 96%; height: 10px; margin-top: 11px; }
 .sk-l3   { width: 91%; height: 10px; margin-top: 11px; }
 .sk-l4   { width: 54%; height: 10px; margin-top: 11px; }
+/* l5-l7 are phone-only: the same sentences wrap to roughly three more lines
+   once the detail column is the full width of a 412px screen instead of a
+   share of a 900px row, so the row is 57px taller there. Shown in the 780px
+   block rather than here. */
+.sk-l5, .sk-l6, .sk-l7 { display: none; width: 88%; height: 10px; margin-top: 9px; }
+/* The real row's actions are a pair — "Clear hold" and "Open". The column is
+   auto-width, so the second costs no height at either breakpoint. */
+.sk-btn2 { display: inline-block; width: 48px; height: 18px;
+           border-radius: var(--radius); margin-left: 6px; }
 .stage-row:nth-child(3) .sk-l1 { width: 72%; }
 .stage-row:nth-child(3) .sk-l3 { width: 41%; }
 .stage-row:nth-child(4) .sk-l1 { width: 94%; }
@@ -2382,6 +2406,8 @@ a[target="_blank"]:active {
   /* Every row below is a grid that gives up its columns: label, value and
      action stack instead of sitting side by side. */
   .stage-row { grid-template-columns: 1fr; gap: 5px; }
+  .boot .sk-l5, .boot .sk-l6, .boot .sk-l7 { display: block; }
+  .boot .sk-l2, .boot .sk-l3, .boot .sk-l4 { margin-top: 9px; }
   .book-row { grid-template-columns: 44px minmax(0, 1fr); }
   .book-row .side { grid-column: 2; align-items: flex-start; }
   .svc-row { grid-template-columns: 10px minmax(0, 1fr); }

@@ -41,7 +41,11 @@
            longer fit beside the wordmark and search without wrapping the bar
            to a third row. Collapses both behind one button instead. -->
       <button class="menu-toggle" type="button" onclick="toggleAccountMenu()" aria-label="Service status and account" aria-expanded="false" aria-controls="acct-panel">
-        <span class="dot" id="menu-dot" aria-hidden="true"></span>
+        <!-- `idle` at boot: the phone header shows a status dot beside the
+             chevron, and it should hold that space from the first paint. idle
+             is the file's own "not checked yet" grey, which is the truth here
+             — renderMasthead() colours it once health is known. -->
+        <span class="dot idle" id="menu-dot" aria-hidden="true"></span>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <!-- display:contents above 780px, so these sit inline exactly as before;
@@ -73,52 +77,52 @@
         <div class="boot" role="status">
           <span class="sr-only">Loading…</span>
           <div class="tiles" aria-hidden="true">
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
-            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span><span class="sk sk-k2"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
+            <div class="tile sk-tile"><span class="sk sk-n"></span><span class="sk sk-k"></span></div>
           </div>
           <section class="panel" aria-hidden="true">
             <h2><span class="sk sk-head"></span><span class="grow"></span><span class="sk sk-btn"></span></h2>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span></div>
-              <div><span class="sk sk-btn"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span><span class="sk sk-l5"></span><span class="sk sk-l6"></span><span class="sk sk-l7"></span></div>
+              <div><span class="sk sk-btn"></span><span class="sk sk-btn2"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span></div>
-              <div><span class="sk sk-btn"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span><span class="sk sk-l5"></span><span class="sk sk-l6"></span><span class="sk sk-l7"></span></div>
+              <div><span class="sk sk-btn"></span><span class="sk sk-btn2"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span></div>
-              <div><span class="sk sk-btn"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span><span class="sk sk-l5"></span><span class="sk sk-l6"></span><span class="sk sk-l7"></span></div>
+              <div><span class="sk sk-btn"></span><span class="sk sk-btn2"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span></div>
-              <div><span class="sk sk-btn"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span><span class="sk sk-l5"></span><span class="sk sk-l6"></span><span class="sk sk-l7"></span></div>
+              <div><span class="sk sk-btn"></span><span class="sk sk-btn2"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span></div>
-              <div><span class="sk sk-btn"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span><span class="sk sk-l5"></span><span class="sk sk-l6"></span><span class="sk sk-l7"></span></div>
+              <div><span class="sk sk-btn"></span><span class="sk sk-btn2"></span></div>
             </div>
             <div class="stage-row">
               <div><span class="sk sk-w1"></span><span class="sk sk-w2"></span></div>
               <div><span class="sk sk-chip"></span></div>
-              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span></div>
-              <div><span class="sk sk-btn"></span></div>
+              <div><span class="sk sk-l1"></span><span class="sk sk-l2"></span><span class="sk sk-l3"></span><span class="sk sk-l4"></span><span class="sk sk-l5"></span><span class="sk sk-l6"></span><span class="sk sk-l7"></span></div>
+              <div><span class="sk sk-btn"></span><span class="sk sk-btn2"></span></div>
             </div>
           </section>
           <section class="panel" aria-hidden="true">
