@@ -11,7 +11,7 @@ Grimmory, Audiobookshelf and Open Notebook, ready to read, listen to, and take n
 [![Last commit](https://img.shields.io/github/last-commit/ohmzi/goodreads-pipeline/develop?style=for-the-badge&color=00635d)](https://github.com/ohmzi/goodreads-pipeline/commits/develop)
 [![License](https://img.shields.io/badge/license-Apache--2.0-00635d?style=for-the-badge)](LICENSE)
 
-[Features](#-features) · [Quick start](#-quick-start) · [Security](#-security) · [Docs](#-documentation) · [Report a bug](https://github.com/ohmzi/goodreads-pipeline/issues)
+[Features](#-features) · [Screenshots](#-screenshots) · [Quick start](#-quick-start) · [Security](#-security) · [Docs](#-documentation) · [Report a bug](https://github.com/ohmzi/goodreads-pipeline/issues)
 
 </div>
 
@@ -31,6 +31,28 @@ off your to-read shelf.
 - **🛡️ Rides out outages.** A per-service circuit breaker holds books while a service is down,
   instead of failing hundreds of them.
 - **🚨 Says what's wrong.** Failures are grouped by cause, each with a plain-language next step.
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+  <img src="docs/assets/readme/dashboard.png" alt="The dashboard: book counts by state, downloads in progress, what needs attention grouped by cause with a suggested fix, and the health of every service" width="900" />
+</div>
+
+<details>
+<summary><b>The book list, one book's pipeline, and the phone layout</b></summary>
+<br/>
+<div align="center">
+  <img src="docs/assets/readme/books.png" alt="My Books: every book with its category, where its genre came from, and how far through the eight stages it is" width="900" />
+  <br/><br/>
+  <img src="docs/assets/readme/pipeline.png" alt="One book's pipeline: each stage's result, with a failed verify stage explaining the fix" width="900" />
+  <br/><br/>
+  <img src="docs/assets/readme/mobile-dashboard.png" alt="The dashboard on a phone" width="300" />
+</div>
+</details>
+
+<sub>Shown with demo data.</sub>
 
 ---
 
