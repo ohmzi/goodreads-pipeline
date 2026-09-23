@@ -543,10 +543,6 @@ def cmd_repair(args: argparse.Namespace) -> int:
             _folder, notebook_name = classify.destination_for(row["category"] or "")
             if not notebook_name:
                 continue
-            notebook = client.notebook_named(notebook_name)
-            nid = str((notebook or {}).get("id") or "")
-            if not nid:
-                continue
             # This is a live batch over hundreds of books against a service
             # this process does not control, and it used to have no guard
             # here at all: one source gone missing between the listing walk
@@ -554,7 +550,18 @@ def cmd_repair(args: argparse.Namespace) -> int:
             # (Open Notebook can drop a source on its own — `notebook`'s own
             # `ClientError(status=404)` handling exists for the same reason)
             # raised past every `except` above it and took the rest of the
-            # batch down with it, discarding every result already printed.
+            # batch down with it, discarding every result already printed. A
+            # transient `/api/notebooks` failure is the same shape of problem,
+            # so it gets the same guard rather than aborting hundreds of
+            # already-computed results.
+            try:
+                notebook = client.notebook_named(notebook_name)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  !! {row['title'][:40]}: {type(exc).__name__}: {exc}")
+                continue
+            nid = str((notebook or {}).get("id") or "")
+            if not nid:
+                continue
             try:
                 links = client.source_notebooks(source_id)
                 count = links.count(nid)

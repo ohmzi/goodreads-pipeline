@@ -75,9 +75,26 @@ categories:
   Manga:
     folder: Manga
     notebook: ""          # no notebook yet; the notebook stage skips these
+  # /books/Natgeo and its notebook are reserved for the National Geographic
+  # magazine archive, which lives there by hand and is not part of this
+  # pipeline at all (no book row, nothing to classify). No genre reaches
+  # this category any more (the old nature/natural history/geography/travel
+  # rules were deleted) specifically so a real downloaded book never lands
+  # here by a genre match — a travel book is a book, and books go in Fiction
+  # (or whichever more specific category actually fits) so they end up
+  # alongside the rest of what you actually read, not mixed in with scans.
   Natgeo:
     folder: Natgeo
-    notebook: ""
+    notebook: Natgeo
+  Science:
+    folder: Science
+    notebook: Science
+  Poetry:
+    folder: Poetry
+    notebook: Poetry
+  Memoir:
+    folder: Memoir
+    notebook: Memoir
 
 genres:
   # --- speculative -----------------------------------------------------
@@ -109,9 +126,20 @@ genres:
   military history: History
   ancient history: History
   history: History
-  biography: History
-  autobiography: History
-  memoir: History
+
+  # --- memoir / biography ------------------------------------------------
+  # Split out from History: a personal life story (a comedian's memoir, an
+  # astronaut's memoir) is a different message than a book actually about
+  # history or politics, and mixing them in one Open Notebook notebook was
+  # exactly the wrong-messages-combined problem this file exists to avoid.
+  # Matching scans a book's genres in Goodreads' popularity order and stops
+  # at the first one that hits any rule, so a book whose "History" genre
+  # outranks its "Memoir"/"Biography" genre still resolves History — this
+  # block only fires when memoir/biography is the higher-ranked genre.
+  biography: Memoir
+  autobiography: Memoir
+  memoir: Memoir
+  biography memoir: Memoir
 
   # --- technical -------------------------------------------------------
   computer science: Technical
@@ -141,6 +169,21 @@ genres:
   cybersecurity: Technical
   cryptography: Technical
 
+  # --- science -----------------------------------------------------------
+  # Split out because it had no bucket at all: Sagan's and deGrasse Tyson's
+  # books were landing in Self-Help via a lower-ranked "Philosophy" genre, or
+  # in History via the memoir fallback, neither of which is the actual
+  # subject. Bare "space" is deliberately left out — it would risk pulling a
+  # SciFi novel tagged just "Space" (no "fiction"-named genre at all) in here;
+  # every real case found so far already carries "Science" or "Astronomy".
+  science: Science
+  popular science: Science
+  physics: Science
+  astronomy: Science
+  cosmology: Science
+  chemistry: Science
+  biology: Science
+
   # --- self help -------------------------------------------------------
   self help: Self-Help
   self-help: Self-Help
@@ -148,6 +191,12 @@ genres:
   psychology: Self-Help
   productivity: Self-Help
   philosophy: Self-Help
+
+  # --- poetry --------------------------------------------------------
+  # Previously unmapped: every poetry collection fell through every rule
+  # to `fallback` and sat in Fiction flagged needs_review.
+  poetry: Poetry
+  poems: Poetry
 
   # --- islamic ---------------------------------------------------------
   islamic: Islamic
@@ -160,12 +209,6 @@ genres:
   manga: Manga
   graphic novels: Manga
   comics: Manga
-
-  # --- nature / geography ----------------------------------------------
-  nature: Natgeo
-  natural history: Natgeo
-  geography: Natgeo
-  travel: Natgeo
 
   # --- practical -------------------------------------------------------
   how to: How-To
