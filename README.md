@@ -2,142 +2,118 @@
 
 # 📚 Goodreads-Pipeline
 
-**Watches your Goodreads _to-read_ shelf, downloads each book, then places it
-into Kavita, BookLore, Grimmory and Audiobookshelf and adds it to Open Notebook
-— ready to read, listen to, and take notes on. One container, and it never
-makes a second copy of a file.**
+**Watches your Goodreads _to-read_ shelf, downloads each book, and files it into Kavita, BookLore,
+Grimmory, Audiobookshelf and Open Notebook, ready to read, listen to, and take notes on.**
+
+<sub>Self-hosted · one container · never makes a second copy of a file · no frontend build step</sub>
 
 [![Version](https://img.shields.io/badge/version-1.4.0-382110?style=for-the-badge)](docs/VERSION.md)
+[![Last commit](https://img.shields.io/github/last-commit/ohmzi/goodreads-pipeline/develop?style=for-the-badge&color=00635d)](https://github.com/ohmzi/goodreads-pipeline/commits/develop)
 [![License](https://img.shields.io/badge/license-Apache--2.0-00635d?style=for-the-badge)](LICENSE)
-[![Python](https://img.shields.io/badge/Python-3.10-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)](requirements.txt)
-[![FastAPI](https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Docker](https://img.shields.io/badge/Docker-2CA5E0?style=for-the-badge&logo=docker&logoColor=white)](Dockerfile)
-[![SQLite](https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white)](docs/ARCHITECTURE.md)
 
-Self-hosted · single-operator · no build step
+[Features](#-features) · [Screenshots](#-screenshots) · [Quick start](#-quick-start) · [Security](#-security) · [Docs](#-documentation) · [Report a bug](https://github.com/ohmzi/goodreads-pipeline/issues)
 
 </div>
 
 ---
 
-## 🔗 The pipeline
+## 👋 What is it?
 
-```
-Goodreads to-read
-  -> acquire           Shelfmark: search + download (ebook, audiobook)
-  -> classify          one category, from the book's genres
-  -> place             ebooks: rename into <Category>/
-                       audiobooks: rename into Author/Title/
-  -> index             rescan Kavita, BookLore, Grimmory, Audiobookshelf
-  -> notebook          add to the matching Open Notebook notebook
-  -> verify            confirm each service really sees the file
-  -> shelve            move off to-read onto collected-pdf / -audiobook / both
-```
+Add a book to your Goodreads *to-read* shelf and walk away. The pipeline finds and downloads the
+ebook and audiobook, files them where your library apps expect them, adds the ebook to the matching
+Open Notebook notebook, checks that every service can really see it, and only then moves the book
+off your to-read shelf.
 
-Two periodic jobs run alongside that chain: `discover` reads the shelf, and
-`reconcile` checks what was recorded against what Goodreads actually shows.
+- **📁 One copy per book.** Every placement is a same-filesystem move, never a copy, so a duplicate
+  can't happen.
+- **✅ Proves it before it commits.** Each library is checked before anything irreversible happens
+  on Goodreads.
+- **🛡️ Rides out outages.** A per-service circuit breaker holds books while a service is down,
+  instead of failing hundreds of them.
+- **🚨 Says what's wrong.** Failures are grouped by cause, each with a plain-language next step.
+
+---
+
+## 📸 Screenshots
+
+<div align="center">
+  <img src="docs/assets/readme/dashboard.png" alt="The dashboard: book counts by state, downloads in progress, what needs attention grouped by cause with a suggested fix, and the health of every service" width="900" />
+</div>
+
+<details>
+<summary><b>The book list, one book's pipeline, and the phone layout</b></summary>
+<br/>
+<div align="center">
+  <img src="docs/assets/readme/books.png" alt="My Books: every book with its category, where its genre came from, and how far through the eight stages it is" width="900" />
+  <br/><br/>
+  <img src="docs/assets/readme/pipeline.png" alt="One book's pipeline: each stage's result, with a failed verify stage explaining the fix" width="900" />
+  <br/><br/>
+  <img src="docs/assets/readme/mobile-dashboard.png" alt="The dashboard on a phone" width="300" />
+</div>
+</details>
+
+<sub>Shown with demo data.</sub>
 
 ---
 
 ## ✨ Features
 
-### 📖 Tracks the shelf
+### 📖 Tracks your shelf
 
-- Reads the to-read shelf through a captured browser session, keyed on the
-  Goodreads id — a re-run refreshes metadata instead of creating duplicates
-- Paginates a shelf that has outgrown one page
-- Reconciles recorded shelves against Goodreads **every 6 hours** and resets
-  anything that drifted
-- Moves finished books off the exclusive to-read shelf using the
-  shelve / confirm / destroy / re-shelve / confirm sequence Goodreads requires,
-  creating the destination shelf first if it does not exist
+- Reads *to-read* through a saved browser session, keyed on the Goodreads id, so re-runs never
+  duplicate.
+- Reconciles your shelves against Goodreads **every 6 hours** and resets anything that drifted.
+- Moves finished books onto *collected-pdf*, *collected-audiobook*, or both, creating the shelf if
+  needed.
 
-### ⬇️ Finds and downloads
+### ⬇️ Finds the right release
 
-- Searches, ranks, hands the best release to Shelfmark, and watches the task
-- Rejects releases on the indexer's Newznab category, on size, and on
-  video-release name patterns **before** ranking — so a film cannot be queued
-  as an audiobook
-- Records every release id tried, so a dead release falls through to the
-  next-best candidate (up to **4** per book) rather than failing the book
-- Re-queues a task missing from Shelfmark's in-memory queue for **10 minutes**
-- Refuses to start an audiobook download below a configurable free-space floor
+- Filters out wrong categories, sizes, and video releases **before** ranking, so a film can't be
+  queued as an audiobook.
+- Falls through to the next-best release (up to **4** per book) instead of failing on a dead one.
+- Won't start an audiobook download below a free-space floor you set.
 
-### 🏷️ Classifies into exactly one category
+### 🏷️ Files every book in exactly one place
 
-- Walks four genre providers — Goodreads AppSync, OpenLibrary, Google Books,
-  embedded epub `dc:subject` — stopping at the first that answers
-- Each provider is isolated, so one timing out cannot stop the next; the
-  embedded source works with every API down
-- Falls back to matching the **title** against the same rules, stored as
-  `genre_source = title`, so an inferred category is always distinguishable
-- Flags anything matching nothing as **needs review** rather than misfiling it
+- Four genre sources (Goodreads, OpenLibrary, Google Books, the epub itself), with the title as a
+  last resort.
+- Anything that matches no rule is flagged **needs review** instead of being misfiled.
+- Ebooks go to `<Category>/Author - Title (Year)/` and audiobooks to `Author/Title/`. An existing
+  file is never overwritten.
 
-### 📁 Files without ever duplicating
+### 🔍 Indexes, then checks
 
-- Ebooks → `<Category>/Author - Title (Year)/`, audiobooks → `Author/Title/`
-- Every placement is `os.rename`: a move that would cross a filesystem **raises
-  rather than falling back to a copy**, so a duplicate is impossible
-- An existing destination is never clobbered — the incoming file is dropped
-  only when it is provably the same inode; everything else gets a suffix
-- Re-running placement is a no-op
+- Rescans Kavita, BookLore, Grimmory, and Audiobookshelf. Nothing is imported or uploaded.
+- Attaches each ebook to its category's Open Notebook notebook by path, so no second copy is stored.
 
-### 🔍 Indexes, then proves it
+### 🛡️ Stays healthy on its own
 
-- Rescans Kavita, BookLore and Grimmory for books, Audiobookshelf for
-  audiobooks — nothing is imported or uploaded
-- Skips an app whose tree did not change rather than failing it
-- `verify` searches each service **before** anything irreversible happens on
-  Goodreads, matching on a normalised word-boundary form with the leading
-  article ignored, treating a differing series number as disqualifying
-- A miss within 10 minutes of a rescan blocks rather than fails, because
-  rescans are asynchronous
+- Stops sending work to a service after **3** consecutive failures, probes until it's back, and
+  gives each book a **24-hour** grace for transient faults.
+- Checks every service's credentials every **5 minutes** with a real, authenticated call.
+- Shows a banner on every page when a credential breaks, with a link to fix it.
 
-### 📓 Feeds Open Notebook
-
-- Each ebook is attached to the notebook its category maps to, handed over as a
-  `file_path` and never as an upload, so no second copy is stored
-- Attachment is verified by reading the source back; a source attached more
-  than once is collapsed
-
-### 🛡️ Survives outages without writing off books
-
-- A per-service **circuit breaker** holds every book waiting on a service after
-  **3** consecutive transient failures — an upstream outage becomes one row
-  naming the service instead of hundreds of failed books
-- A half-open probe lets one book through to discover when it is back, and a
-  stuck hold can be released by hand
-- Separately, each book gets a **24-hour** grace on transient faults, measured
-  from when the outage started — not from how many times it was retried
-
-### ⚡ Stays responsive under load
-
-- Each sweep gets a **120-second** budget and advances up to **6** books
-  concurrently, serving least-recently-touched first, so a bounded pass still
-  rotates through the whole list and publishes its result
-
-### 🚨 Tells you what is wrong and what to do
-
-- Every service is probed on a **5-minute** timer with an _authenticated_ call
-  — never a bare health endpoint that a wrong API key would pass
-- Every failed stage carries a `failure_kind` (`auth`, `network`, `server`,
-  `busy`, `data`), and the UI groups failures **by cause rather than by book**,
-  with a suggested next step in plain language and a _Retry all_ where retrying
-  helps
-- A broken credential raises a banner on every page with a link to the fix
+> [!TIP]
+> Every behaviour, with its numbers and edge cases, is in **[docs/FEATURES.md](docs/FEATURES.md)**.
+> Each stage is covered in depth in [docs/PIPELINE.md](docs/PIPELINE.md).
 
 ---
 
-## 🛠️ Built with
+## 🔗 How it works
 
-| Layer | What it uses |
-|---|---|
-| **API + UI** | FastAPI, Uvicorn — UI served straight from `app/static/`, no framework and no build step |
-| **Storage** | SQLite (WAL), one file, no ORM |
-| **Goodreads session** | Playwright + Chromium on a virtual display, streamed to the browser over noVNC |
-| **HTTP** | httpx, BeautifulSoup |
-| **Crypto** | `cryptography` (Fernet) for credentials, scrypt for passwords |
-| **Packaging** | Docker, on Playwright's own image so Chromium is version-matched |
+```mermaid
+flowchart LR
+    toread["📚 Goodreads<br/>to-read shelf"] -->|discover| classify["🏷️ Classify"]
+    classify --> acquire["⬇️ Acquire<br/>via Shelfmark"]
+    acquire --> place["📁 Place<br/>move, never copy"]
+    place --> index["🔍 Index<br/>rescan libraries"]
+    index --> notebook["📓 Notebook<br/>Open Notebook"]
+    notebook --> verify["✅ Verify"]
+    verify -->|shelve| done["📚 Goodreads<br/>collected shelf"]
+```
+
+Two periodic jobs run alongside: `discover` reads the shelf, and `reconcile` checks what's recorded
+against what Goodreads actually shows.
 
 ---
 
@@ -147,46 +123,23 @@ Two periodic jobs run alongside that chain: `discover` reads the shelf, and
 git clone https://github.com/ohmzi/goodreads-pipeline.git goodreads
 cd goodreads
 cp .env.example .env
-python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # -> GOODREADS_SECRET_KEY
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"   # paste into GOODREADS_SECRET_KEY
 chmod 600 .env
 docker compose up -d --build
-```
-
-Left unset, `8091` is published on every interface, and a published port is
-*not* covered by ufw — docker's iptables rules are evaluated before the
-firewall's. It is worth narrowing with `PUBLISH_HOST` in `.env`, and **easy to
-get wrong in a way that takes the app offline**: a binding to one address
-answers only on that address, so a value your front end does not dial means
-every request is refused with nothing in the app's logs at all.
-
-Confirm where your front end reaches you from first:
-
-```bash
-docker compose logs goodreads | grep 'GET /login'
-```
-
-and note that a proxy or tunnel running in a **container** dials you as its
-bridge gateway (`172.x.0.1`), never as `127.0.0.1` — so `127.0.0.1` suits only a
-proxy running directly on the host. `0.0.0.0` (the default) is always safe.
-
-This decides which of the host's addresses the port answers on. It does **not**
-decide whether the app is reachable from the internet: a tunnel in front reaches
-it whichever value is set. See [SECURITY.md](docs/SECURITY.md).
-
-Create a login, then open `http://<host>:8091`:
-
-```bash
 docker compose exec goodreads python -m app.cli set-password you --generate
 ```
 
-There is deliberately no default account. Library paths and any extra networks
-belong in a gitignored `docker-compose.override.yml`; the committed compose
-uses placeholders so a clone runs unedited.
+Open `http://<host>:8091`, sign in, and connect your services on the Settings page. There's no
+default account. Put your library paths and any extra networks in a git-ignored
+`docker-compose.override.yml`.
 
-> 📘 **Full instructions** — mounts, networks, first run in the UI, and running
-> without the container — are in **[SETUP.md](docs/SETUP.md)**.
+> [!WARNING]
+> By default, port `8091` listens on every interface, and Docker's published ports bypass ufw.
+> Narrowing it with `PUBLISH_HOST` is worth doing, but a wrong value makes the app refuse every
+> request. Read **[SETUP.md → Start it](docs/SETUP.md#2-start-it)** first.
 
-### 💻 From the command line
+<details>
+<summary><b>💻 Maintenance CLI</b></summary>
 
 ```bash
 python -m app.cli report            # what completed, what failed, and why
@@ -198,95 +151,150 @@ python -m app.cli backfill-genres   # re-resolve genres and re-categorise
 python -m app.cli forget-session    # drop the stored Goodreads session + browser profile
 ```
 
-`report` and `audit` are read-only. `repair`, `rename`, `reconcile` and
-`reclassify` change nothing without `--apply`. Two write immediately:
-`backfill-genres`, and `forget-session`, which deletes the stored Goodreads
-session and the browser profile and refuses while a login browser is running.
+`report` and `audit` only read. `repair`, `rename`, `reconcile`, and `reclassify` change nothing
+without `--apply`. `backfill-genres` and `forget-session` write immediately. See
+[OPERATIONS.md](docs/OPERATIONS.md#the-maintenance-cli).
+
+</details>
 
 ---
 
-## 🔐 Security
+## 🔌 Integrations
 
-> This app is the most sensitive service you will run. It holds the key that
-> decrypts every stored credential, it can drive a browser signed into a real
-> personal account, and it can write to a real library tree.
+| Service            | Role                                                        | Stage                  |
+|--------------------|-------------------------------------------------------------|------------------------|
+| **Goodreads**      | The shelf itself: read by `discover`, written by `shelve`   | `discover`, `shelve`   |
+| **Shelfmark**      | Searches indexers and downloads ebooks and audiobooks       | `acquire`              |
+| **Kavita**         | Ebook library, rescanned after placement                    | `index`, `verify`      |
+| **BookLore**       | Ebook library, rescanned after placement                    | `index`, `verify`      |
+| **Grimmory**       | Ebook library, rescanned after placement                    | `index`, `verify`      |
+| **Audiobookshelf** | Audiobook library, rescanned after placement                | `index`, `verify`      |
+| **Open Notebook**  | Receives each ebook as a source in its category's notebook  | `notebook`, `verify`   |
 
-Passwords are hashed with scrypt and compared in constant time. Sessions are
-stateless HMAC-SHA256 tokens carrying a password epoch, so changing a password
-evicts every outstanding session — and so does **signing out**, on every device
-at once. Failed logins are throttled by username _and_ client address with a
-progressive delay rather than a lockout, so nobody can shut the owner out of
-their own UI. Every credential is Fernet-encrypted at rest behind a
-`GOODREADS_SECRET_KEY` that must be at least 32 characters, and the data volume
-is kept owner-only by a `umask 077` plus a one-off tighten at startup. Requests
-from another site are refused on the server, not only by `SameSite`, and the
-calls the app makes to your other services refuse redirects, cap response
-bodies, and withhold error bodies from anything that carried a credential.
-
-The noVNC desktop has no published port: x11vnc binds to loopback inside the
-container and the app bridges to it over a WebSocket that checks both the
-origin and the session. That leaves the one published port as the only way in,
-so the sign-in page is what stands in front of everything. `PUBLISH_HOST`
-decides which of the host's addresses that port answers on — it does not decide
-whether something in front can reach it.
-
-> ⚠️ The threat model, credential storage design, reverse-proxy deployment, and
-> an explicit list of known limits — including that the session cookie is a
-> bearer token and that traffic is plain HTTP without a TLS terminator in front
-> — are in **[SECURITY.md](docs/SECURITY.md)**. Read it before exposing this
-> beyond a host you control.
+Settings each service needs, and the ones that caused trouble, are in
+[INTEGRATIONS.md](docs/INTEGRATIONS.md).
 
 ---
 
 ## ⚙️ Configuration
 
-> Secrets are split by lifetime: `.env` holds what must exist before the
-> database can be read; service credentials are typed into the Settings page,
-> encrypted with Fernet, and stored in the database.
+- **`.env`** holds only what must exist before the database can be read, such as the secret key.
+- **Service credentials** are entered on the Settings page and stored Fernet-encrypted in the
+  database.
+- **`app/categories.yml`** maps genres to a folder and a notebook. `/data/categories.yml` overrides
+  it and is re-read on every classification, so edits need no restart.
 
-`app/categories.yml` is the rule table that decides where a book lands — a
-category key per genre needle, mapped to a folder and an Open Notebook
-notebook. Matching is substring, case-insensitive, and longest-needle-first, so
-`science fiction` beats `fiction` regardless of file order. The file ships in
-the image and `/data/categories.yml` overrides it, so tuning survives a
-rebuild, and it is re-read per classification, so an edit needs no restart.
-
-> 📗 Every environment variable, every credential, the genre provider chain, and
-> the library-root mapping each service sees are in
-> **[CONFIGURATION.md](docs/CONFIGURATION.md)**.
+Every variable, credential, and path mapping: [CONFIGURATION.md](docs/CONFIGURATION.md).
 
 ---
 
-## 🤔 Why the Goodreads login is manual
+## 🛠️ Built with
 
-Goodreads removed its public API in 2020, then removed public shelf pages, and
-`/user/sign_in` is now a stub that hands off to Amazon's sign-in flow. There is
-no form to POST a password to — every maintained Goodreads tool today reuses a
-persistent browser session instead.
+<div align="center">
 
-So this runs Chromium on a virtual display inside its own container and streams
-it to the login page over noVNC. You sign in once, the cookies are saved, and
-everything afterwards runs over plain HTTP with them. When the session
-eventually expires the UI says so and you do it again.
+<img alt="Python" src="https://img.shields.io/badge/Python%203.10-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54" />
+<img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-005571?style=for-the-badge&logo=fastapi&logoColor=white" />
+<img alt="Uvicorn" src="https://img.shields.io/badge/Uvicorn-2F2F2F?style=for-the-badge" />
+<img alt="SQLite" src="https://img.shields.io/badge/SQLite-07405E?style=for-the-badge&logo=sqlite&logoColor=white" />
+<br/>
+<img alt="Playwright" src="https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white" />
+<img alt="Chromium" src="https://img.shields.io/badge/Chromium%20%2B%20noVNC-4285F4?style=for-the-badge&logo=googlechrome&logoColor=white" />
+<img alt="httpx" src="https://img.shields.io/badge/httpx-3F51B5?style=for-the-badge" />
+<img alt="Docker" src="https://img.shields.io/badge/Docker-2CA5E0?style=for-the-badge&logo=docker&logoColor=white" />
+
+</div>
+
+SQLite (WAL) in one file with no ORM. Credentials are encrypted with `cryptography` (Fernet) and
+passwords hashed with scrypt. The UI is served straight from `app/static/`, with no framework and no
+build step. The image is built on Playwright's own, so Chromium's version always matches.
 
 ---
 
-## 📖 Documentation
+## 🔐 Security
 
-| Document | What is in it |
-|---|---|
-| 🚀 [SETUP.md](docs/SETUP.md) | Install, mounts and networks, first login, first run, bare-metal |
-| ⚙️ [CONFIGURATION.md](docs/CONFIGURATION.md) | Every variable, credential, and path mapping; `categories.yml`; genre resolution |
-| 🔐 [SECURITY.md](docs/SECURITY.md) | **What is enforced and where** (the whole posture on one page), threat model, credential storage, sessions, reverse proxy, known limits |
-| 🔧 [OPERATIONS.md](docs/OPERATIONS.md) | Upgrading, backup and restore, the maintenance CLI, health, troubleshooting |
-| 🏗️ [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Components, module map, the database, concurrency, the path namespace problem |
-| 🔄 [PIPELINE.md](docs/PIPELINE.md) | Every stage in detail, the scheduler, retries, the service breaker |
-| 🔌 [INTEGRATIONS.md](docs/INTEGRATIONS.md) | The surrounding services, the settings each needs, and what went wrong |
-| 🌐 [API.md](docs/API.md) | The HTTP API |
-| 📝 [VERSION.md](docs/VERSION.md) | Release notes |
+- **Passwords** are hashed with scrypt and compared in constant time.
+- **Sessions** carry a password epoch, so changing your password or signing out ends every session
+  on every device.
+- **Failed logins** slow down progressively by username *and* address. There's no lockout, so no
+  one can shut you out of your own UI.
+- **Every credential** is Fernet-encrypted behind a secret key of at least 32 characters, and the
+  data volume is owner-only.
+- **Cross-site requests are refused on the server.** Calls to your services refuse redirects and cap
+  response sizes.
+- **The noVNC desktop has no published port.** It's reachable only through a WebSocket that checks
+  origin and session.
+
+> [!CAUTION]
+> This is the most sensitive service you'll run. It holds the key to every stored credential and a
+> browser signed in to your real account. Traffic is plain HTTP unless something terminates TLS in
+> front. Read **[SECURITY.md](docs/SECURITY.md)** (threat model, reverse proxies, known limits)
+> before exposing it beyond a host you control.
+
+---
+
+## ❓ FAQ
+
+<details>
+<summary><b>Why is the Goodreads login manual?</b></summary>
+<br/>
+
+Goodreads removed its public API in 2020, then removed public shelf pages, and `/user/sign_in` is
+now a stub that hands off to Amazon's sign-in flow. There's no form to post a password to, so every
+maintained Goodreads tool reuses a persistent browser session instead.
+
+This one runs Chromium on a virtual display inside its own container and streams it to the login
+page over noVNC. You sign in once and the cookies are saved. Everything after that runs over plain
+HTTP with them. When the session eventually expires, the UI tells you, and you sign in again.
+
+</details>
+
+<details>
+<summary><b>Will it ever duplicate a file?</b></summary>
+<br/>
+
+No. Every placement is an `os.rename` within one filesystem. A move that would cross filesystems
+raises an error instead of falling back to a copy, and each library app only rescans a tree it
+already mounts. [ARCHITECTURE.md](docs/ARCHITECTURE.md) explains why.
+
+</details>
+
+---
+
+## 📚 Documentation
+
+| Document                                          | What's in it                                                                  |
+|---------------------------------------------------|-------------------------------------------------------------------------------|
+| 🚀 [SETUP.md](docs/SETUP.md)                      | Install, mounts and networks, first login, first run, running without Docker |
+| ✨ [FEATURES.md](docs/FEATURES.md)                | Every behaviour with its numbers and edge cases                               |
+| ⚙️ [CONFIGURATION.md](docs/CONFIGURATION.md)      | Every variable, credential, and path mapping; `categories.yml`; genres        |
+| 🔐 [SECURITY.md](docs/SECURITY.md)                | What's enforced and where, threat model, reverse proxies, known limits        |
+| 🔧 [OPERATIONS.md](docs/OPERATIONS.md)            | Upgrading, backup and restore, the maintenance CLI, health, troubleshooting   |
+| 🏗️ [ARCHITECTURE.md](docs/ARCHITECTURE.md)        | Components, module map, database, concurrency, the path namespace problem     |
+| 🔄 [PIPELINE.md](docs/PIPELINE.md)                | Every stage, the scheduler, retries, the service breaker                      |
+| 🔌 [INTEGRATIONS.md](docs/INTEGRATIONS.md)        | The surrounding services and the settings each one needs                      |
+| 🌐 [API.md](docs/API.md)                          | The HTTP API                                                                  |
+| 📝 [VERSION.md](docs/VERSION.md)                  | Release notes                                                                 |
+
+---
+
+## 🤝 Contributing
+
+- 🐞 **Found a bug?** [Open an issue](https://github.com/ohmzi/goodreads-pipeline/issues).
+- 💡 **Have an idea?** [Suggest it](https://github.com/ohmzi/goodreads-pipeline/issues).
+- 🔒 **Security concern?** Read [SECURITY.md](docs/SECURITY.md) first, and don't post secrets or
+  host details in a public issue.
 
 ---
 
 ## 📄 License
 
 [Apache-2.0](LICENSE) © 2026 Omar
+
+Goodreads-Pipeline is an independent project. It is not affiliated with, endorsed by, or sponsored by
+Goodreads or Amazon.
+
+<div align="center">
+
+<sub>Read more, file less · <a href="#top">Back to top ↑</a></sub>
+
+</div>
