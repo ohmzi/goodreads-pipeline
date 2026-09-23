@@ -56,7 +56,7 @@ def without_precedence(rules: dict) -> dict:
         (["Nonfiction", "History", "Biography"], "History"),
         (["Non Fiction", "History"], "History"),
         (["Non-Fiction", "History"], "History"),
-        (["Nonfiction", "Biography"], "History"),
+        (["Nonfiction", "Biography"], "Memoir"),  # biography/memoir split out of History
         # THE COST, CHOSEN WITH IT MEASURED AND ACCEPTED. A book carrying
         # "Fiction" anywhere in its genre list is Fiction, even when a more
         # specific genre is listed first. Goodreads tags 59 of the 62 Fantasy
